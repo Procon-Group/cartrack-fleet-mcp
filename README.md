@@ -24,10 +24,10 @@ npm run build
 
 1. Log into Fleetweb -> Settings -> API Settings -> Generate User Credentials.
 2. Set `CARTRACK_USERNAME` / `CARTRACK_PASSWORD` in `.env`.
-3. Set `CARTRACK_BASE_URL` — Cartrack has ~26 per-country API hosts, all shaped
-   `https://fleetapi-<cc>.cartrack.com/rest` (e.g. `fleetapi-za.cartrack.com`). **Confirm
-   which host serves the Namibian fleet** — check the developer portal / ask Cartrack
-   support; don't assume South Africa's host is correct without confirming.
+3. `CARTRACK_BASE_URL` — confirmed from Cartrack's own docs (base-url page): Namibia has
+   its own country code (`na`), so this is `https://fleetapi-na.cartrack.com/rest`
+   (already set as the default in `.env.example`). Cartrack has ~26 per-country hosts total,
+   all shaped `https://fleetapi-<cc>.cartrack.com/rest`.
 
 ### Google Sheets/Drive (service account — no OAuth, works unattended)
 
