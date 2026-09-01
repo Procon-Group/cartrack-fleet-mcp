@@ -543,6 +543,10 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.3-7-11.5A7 7 0 0 1 19 9.5C19 14.7 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.4"/></svg>
     Geotag
   </button>
+  <button class="tab navitem" data-tab="costcompany">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="1.5"/><path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7"/><path d="M3 12h18"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>
+    Cost to Company
+  </button>
 
   <div class="sidebar-section-label">Reports</div>
   <button class="tab navitem" data-tab="vehiclereport">
@@ -878,6 +882,81 @@
   <!-- GEOTAG -->
   <div class="view" data-view="geotag">
     <div id="geo-content"></div>
+  </div>
+
+  <!-- COST TO COMPANY -->
+  <div class="view" data-view="costcompany">
+    <div id="ctc-availability-note" class="note-box" style="display:none; margin-bottom:14px;"></div>
+    <div class="kpi-row" id="ctc-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Cost to company, by division</div>
+          <div class="card-note" id="ctc-division-note">Fuel + tyres/services + insurance + depreciation, blended cost/km</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="ctc-division-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Cost to company, by vehicle</div>
+          <div class="card-note" id="ctc-vehicle-note"></div>
+        </div>
+        <button class="btn-accent" id="ctc-settings-toggle" type="button">Manage settings</button>
+      </div>
+      <div class="table-scroll">
+        <table id="ctc-vehicle-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="card" id="ctc-settings-panel" style="margin-top:14px; display:none;">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Vehicle cost settings</div>
+          <div class="card-note">Insurance, purchase price, residual value and useful life — saved for every viewer, survives dashboard rebuilds</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="ctc-settings-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
+      <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:12px;">
+        <span id="ctc-settings-status" style="font-size:12px; color:var(--ink-muted);"></span>
+        <button class="btn-accent" id="ctc-settings-save" type="button">Save settings</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Service &amp; other expenses</div>
+          <div class="card-note">Logged here, saved for every viewer — tyre purchases already in the fleet workbook show too</div>
+        </div>
+      </div>
+      <div class="filters" style="margin-bottom:12px;">
+        <span class="filter-label">Date</span>
+        <input class="search" type="date" id="ctc-exp-date" style="width:140px;" />
+        <span class="filter-label">Vehicle</span>
+        <select class="control" id="ctc-exp-vehicle"></select>
+        <span class="filter-label">Type</span>
+        <select class="control" id="ctc-exp-type"><option>Service</option><option>Tyres</option><option>Other</option></select>
+        <span class="filter-label">Cost (R)</span>
+        <input class="search" type="number" id="ctc-exp-cost" style="width:100px;" min="0" step="0.01" />
+        <input class="search" type="text" id="ctc-exp-desc" placeholder="Description" style="width:180px;" />
+        <button class="btn-accent" id="ctc-exp-add" type="button">Add</button>
+      </div>
+      <div class="table-scroll">
+        <table id="ctc-expense-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="note-box" style="margin-top:12px;">
+      <b>How this is calculated:</b> per vehicle, per month — fuel-card Rand, tyres/services/other logged below, this vehicle's monthly insurance, and straight-line depreciation ((purchase price − residual value) ÷ useful-life months, while inside that window) — all divided by Cartrack-metered km for the same target month used by Cost/KM and Fuel Efficiency. Vehicles with no cost settings entered yet only show fuel and any logged expenses.
+    </div>
   </div>
 
   <!-- SPEEDING -->
@@ -2323,6 +2402,263 @@
       + '</div>';
   }
 
+  /* ---------------- Cost to Company ---------------- */
+  var CTC_DB = null;
+  var CTC_SETTINGS = {};      // { [reg]: { insuranceMonthly, purchasePrice, residualValue, usefulLifeMonths, purchaseDate } }
+  var CTC_EXPENSES = [];      // [{ id, date, reg, type, cost, desc }] from db, most recent first
+  var CTC_STATIC_EXPENSES = RAW2.expenses || []; // one-time snapshot already in the fleet workbook (e.g. the one Tyres entry)
+  var CTC_READY = false;
+
+  function ctcMonthsBetween(fromDate, toMonth){
+    if (!fromDate || !toMonth) return null;
+    var fp = fromDate.split('-'), tp = toMonth.split('-');
+    if (fp.length < 2 || tp.length < 2) return null;
+    var fy = parseInt(fp[0],10), fm = parseInt(fp[1],10);
+    var ty = parseInt(tp[0],10), tm = parseInt(tp[1],10);
+    if (!fy || !fm || !ty || !tm) return null;
+    return (ty - fy) * 12 + (tm - fm);
+  }
+
+  function ctcMonthlyDepreciation(settings, month){
+    if (!settings || !settings.purchaseDate || !settings.usefulLifeMonths || !settings.purchasePrice) return 0;
+    var elapsed = ctcMonthsBetween(settings.purchaseDate, month);
+    if (elapsed == null || elapsed < 0 || elapsed >= settings.usefulLifeMonths) return 0;
+    var residual = settings.residualValue || 0;
+    return Math.max(0, (settings.purchasePrice - residual) / settings.usefulLifeMonths);
+  }
+
+  function ctcOneOffTotal(reg, month){
+    var total = 0;
+    CTC_STATIC_EXPENSES.forEach(function(e){ if (e.reg === reg && e.month === month) total += (e.cost||0); });
+    CTC_EXPENSES.forEach(function(e){ if (e.reg === reg && (e.date||'').slice(0,7) === month) total += (e.cost||0); });
+    return total;
+  }
+
+  function ctcTargetMonth(){
+    return (FE.targetMonth) || (CK.targetMonth) || MONTHS2[MONTHS2.length-1] || null;
+  }
+
+  function ctcComputeRows(){
+    var month = ctcTargetMonth();
+    return flVehicleList().map(function(reg){
+      var meta = FLEET[reg] || {};
+      var settings = CTC_SETTINGS[reg] || {};
+      var fuel = month ? FUEL2.filter(function(f){ return f.r===reg && f.m===month; }).reduce(function(s,t){ return s+(t.c||0); }, 0) : 0;
+      var other = month ? ctcOneOffTotal(reg, month) : 0;
+      var insurance = settings.insuranceMonthly || 0;
+      var depreciation = month ? ctcMonthlyDepreciation(settings, month) : 0;
+      var total = fuel + other + insurance + depreciation;
+      var cStats = (VM.byReg[reg] && VM.byReg[reg][month]) || null;
+      var km = cStats ? cStats.km : null;
+      var costPerKm = (km && km > 0) ? total / km : null;
+      return { reg: reg, division: meta.division||'Unassigned', fuel: fuel, other: other, insurance: insurance,
+        depreciation: depreciation, total: total, km: km, costPerKm: costPerKm,
+        hasSettings: !!(settings.insuranceMonthly || settings.purchasePrice) };
+    });
+  }
+
+  function renderCostToCompanyKpis(rows, month){
+    var totalCost = rows.reduce(function(s,r){ return s+r.total; }, 0);
+    var totalKm = rows.reduce(function(s,r){ return s + (r.km||0); }, 0);
+    var blended = totalKm > 0 ? totalCost / totalKm : null;
+    var configured = rows.filter(function(r){ return r.hasSettings; }).length;
+    var cards = [
+      { label: 'Target month', value: month || '—' },
+      { label: 'Fleet cost/km (all-in)', value: blended==null ? '—' : money(blended,2) },
+      { label: 'Total monthly cost', value: money(totalCost,0) },
+      { label: 'Vehicles with settings', value: configured + ' / ' + rows.length },
+    ];
+    document.getElementById('ctc-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value">'+esc(c.value)+'</div></div>';
+    }).join('');
+  }
+
+  function renderCostToCompanyDivisionTable(rows){
+    var table = document.getElementById('ctc-division-table');
+    var head = ['Division','Fuel','Tyres/services','Insurance','Depreciation','Total cost','Km','Cost/km'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var byDiv = {};
+    rows.forEach(function(r){
+      var d = byDiv[r.division] || { division: r.division, fuel:0, other:0, insurance:0, depreciation:0, total:0, km:0 };
+      d.fuel += r.fuel; d.other += r.other; d.insurance += r.insurance; d.depreciation += r.depreciation; d.total += r.total; d.km += (r.km||0);
+      byDiv[r.division] = d;
+    });
+    var divRows = Object.keys(byDiv).map(function(k){ return byDiv[k]; }).sort(function(a,b){ return b.total - a.total; });
+    var fleetTotal = rows.reduce(function(acc,r){
+      acc.fuel += r.fuel; acc.other += r.other; acc.insurance += r.insurance; acc.depreciation += r.depreciation; acc.total += r.total; acc.km += (r.km||0);
+      return acc;
+    }, { fuel:0, other:0, insurance:0, depreciation:0, total:0, km:0 });
+    function rowHtml(label, d, strong){
+      var cpk = d.km > 0 ? d.total / d.km : null;
+      return '<tr'+(strong?' style="font-weight:650;"':'')+'>'
+        + '<td>'+esc(label)+'</td>'
+        + '<td class="num tnum">'+money(d.fuel,0)+'</td>'
+        + '<td class="num tnum">'+money(d.other,0)+'</td>'
+        + '<td class="num tnum">'+money(d.insurance,0)+'</td>'
+        + '<td class="num tnum">'+money(d.depreciation,0)+'</td>'
+        + '<td class="num tnum">'+money(d.total,0)+'</td>'
+        + '<td class="num tnum">'+(d.km?n1(d.km)+' km':'—')+'</td>'
+        + '<td class="num tnum">'+(cpk==null?'—':money(cpk,2))+'</td>'
+        + '</tr>';
+    }
+    table.querySelector('tbody').innerHTML = divRows.map(function(d){ return rowHtml(d.division, d, false); }).join('')
+      + rowHtml('All divisions', fleetTotal, true);
+  }
+
+  function renderCostToCompanyVehicleTable(rows, month){
+    var table = document.getElementById('ctc-vehicle-table');
+    var head = ['Vehicle','Division','Fuel','Tyres/services','Insurance','Depreciation','Total cost','Km','Cost/km'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var sorted = [...rows].sort(function(a,b){ return (b.costPerKm||0) - (a.costPerKm||0); });
+    table.querySelector('tbody').innerHTML = sorted.map(function(r){
+      return '<tr>'
+        + '<td><span class="plate">'+esc(r.reg)+'</span></td>'
+        + '<td>'+esc(r.division)+'</td>'
+        + '<td class="num tnum">'+money(r.fuel,0)+'</td>'
+        + '<td class="num tnum">'+money(r.other,0)+'</td>'
+        + '<td class="num tnum">'+money(r.insurance,0)+'</td>'
+        + '<td class="num tnum">'+money(r.depreciation,0)+'</td>'
+        + '<td class="num tnum">'+money(r.total,0)+'</td>'
+        + '<td class="num tnum">'+(r.km?n1(r.km)+' km':'—')+'</td>'
+        + '<td class="num tnum">'+(r.costPerKm==null?'—':money(r.costPerKm,2))+'</td>'
+        + '</tr>';
+    }).join('');
+    document.getElementById('ctc-vehicle-note').textContent = month
+      ? 'All-in cost ÷ Cartrack-metered km, ' + month
+      : 'No target month available yet';
+  }
+
+  function renderCostToCompanySettingsTable(){
+    var table = document.getElementById('ctc-settings-table');
+    var head = ['Vehicle','Insurance / month (R)','Purchase price (R)','Residual value (R)','Useful life (months)','Purchase date'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    table.querySelector('tbody').innerHTML = flVehicleList().map(function(reg){
+      var s = CTC_SETTINGS[reg] || {};
+      return '<tr data-reg="'+esc(reg)+'">'
+        + '<td><span class="plate">'+esc(reg)+'</span></td>'
+        + '<td><input class="search ctc-set-input" data-field="insuranceMonthly" type="number" min="0" step="0.01" style="width:110px;" value="'+(s.insuranceMonthly!=null?s.insuranceMonthly:'')+'" /></td>'
+        + '<td><input class="search ctc-set-input" data-field="purchasePrice" type="number" min="0" step="1" style="width:120px;" value="'+(s.purchasePrice!=null?s.purchasePrice:'')+'" /></td>'
+        + '<td><input class="search ctc-set-input" data-field="residualValue" type="number" min="0" step="1" style="width:120px;" value="'+(s.residualValue!=null?s.residualValue:'')+'" /></td>'
+        + '<td><input class="search ctc-set-input" data-field="usefulLifeMonths" type="number" min="1" step="1" style="width:90px;" value="'+(s.usefulLifeMonths!=null?s.usefulLifeMonths:'')+'" /></td>'
+        + '<td><input class="search ctc-set-input" data-field="purchaseDate" type="date" style="width:150px;" value="'+(s.purchaseDate||'')+'" /></td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  function renderCostToCompanyExpenseTable(){
+    var table = document.getElementById('ctc-expense-table');
+    var head = ['Date','Vehicle','Type','Cost','Description'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var combined = CTC_STATIC_EXPENSES.map(function(e){ return { date: e.date, reg: e.reg, type: e.type, cost: e.cost, desc: e.desc, source: 'workbook' }; })
+      .concat(CTC_EXPENSES.map(function(e){ return { date: e.date, reg: e.reg, type: e.type, cost: e.cost, desc: e.desc, source: 'live' }; }))
+      .sort(function(a,b){ return a.date < b.date ? 1 : -1; })
+      .slice(0, 100);
+    table.querySelector('tbody').innerHTML = combined.length ? combined.map(function(e){
+      return '<tr>'
+        + '<td class="tnum">'+esc(e.date)+'</td>'
+        + '<td><span class="plate">'+esc(e.reg)+'</span></td>'
+        + '<td>'+esc(e.type)+(e.source==='workbook'?' <span class="pill pill-muted" title="From the fleet workbook">workbook</span>':'')+'</td>'
+        + '<td class="num tnum">'+money(e.cost,2)+'</td>'
+        + '<td>'+esc(e.desc||'—')+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="5" style="text-align:center; color:var(--ink-muted); padding:18px;">No expenses logged yet</td></tr>';
+  }
+
+  function renderCostToCompany(){
+    var note = document.getElementById('ctc-availability-note');
+    if (!window.claude || !CTC_READY){
+      note.style.display = 'block';
+      note.innerHTML = '<b>Live editing not connected.</b> Insurance/depreciation settings and the expense log need the published dashboard\'s live data connection — figures below use fuel and workbook data only until it connects. If this persists on the published page, the db capability may not be granted for this artifact.';
+    } else {
+      note.style.display = 'none';
+    }
+    var month = ctcTargetMonth();
+    var rows = ctcComputeRows();
+    renderCostToCompanyKpis(rows, month);
+    renderCostToCompanyDivisionTable(rows);
+    renderCostToCompanyVehicleTable(rows, month);
+    renderCostToCompanyExpenseTable();
+  }
+
+  function ctcPopulateExpenseVehicleSelect(){
+    var sel = document.getElementById('ctc-exp-vehicle');
+    if (!sel || sel.options.length) return;
+    sel.innerHTML = flVehicleList().map(function(reg){ return '<option value="'+esc(reg)+'">'+esc(reg)+'</option>'; }).join('');
+  }
+
+  function ctcInitDb(){
+    if (!window.claude || typeof window.claude.use !== 'function') { renderCostToCompany(); return; }
+    claude.use('db').then(function(db){
+      if (!db){ renderCostToCompany(); return; }
+      CTC_DB = db;
+      CTC_READY = true;
+
+      db.doc('ctc/vehicleSettings').onSnapshot(function(snap){
+        CTC_SETTINGS = (snap.exists && snap.data()) || {};
+        renderCostToCompanySettingsTable();
+        renderCostToCompany();
+      }, function(){ renderCostToCompany(); });
+
+      db.collection('ctc-expenses').orderBy('date','desc').limit(200).onSnapshot(function(snap){
+        CTC_EXPENSES = snap.docs.map(function(d){ var v = d.data() || {}; return { id: d.id, date: v.date, reg: v.reg, type: v.type, cost: v.cost, desc: v.desc }; });
+        renderCostToCompany();
+      }, function(){ renderCostToCompany(); });
+    }).catch(function(){ renderCostToCompany(); });
+  }
+
+  document.getElementById('ctc-settings-toggle').addEventListener('click', function(){
+    var panel = document.getElementById('ctc-settings-panel');
+    var open = panel.style.display !== 'none';
+    if (!open) renderCostToCompanySettingsTable();
+    panel.style.display = open ? 'none' : 'block';
+  });
+
+  document.getElementById('ctc-settings-save').addEventListener('click', function(){
+    var status = document.getElementById('ctc-settings-status');
+    if (!CTC_DB){ status.textContent = 'Not connected — open the published dashboard to save.'; return; }
+    var next = {};
+    Array.prototype.forEach.call(document.querySelectorAll('#ctc-settings-table tbody tr'), function(tr){
+      var reg = tr.getAttribute('data-reg');
+      var entry = {};
+      Array.prototype.forEach.call(tr.querySelectorAll('.ctc-set-input'), function(input){
+        var field = input.getAttribute('data-field');
+        if (field === 'purchaseDate'){
+          if (input.value) entry.purchaseDate = input.value;
+        } else if (input.value !== ''){
+          entry[field] = Number(input.value);
+        }
+      });
+      if (Object.keys(entry).length) next[reg] = entry;
+    });
+    status.textContent = 'Saving…';
+    CTC_DB.doc('ctc/vehicleSettings').set(next).then(function(){
+      status.textContent = 'Saved ' + new Date().toLocaleTimeString();
+    }).catch(function(err){
+      status.textContent = 'Save failed: ' + (err && err.message ? err.message : 'unknown error');
+    });
+  });
+
+  document.getElementById('ctc-exp-add').addEventListener('click', function(){
+    var dateEl = document.getElementById('ctc-exp-date');
+    var vehicleEl = document.getElementById('ctc-exp-vehicle');
+    var typeEl = document.getElementById('ctc-exp-type');
+    var costEl = document.getElementById('ctc-exp-cost');
+    var descEl = document.getElementById('ctc-exp-desc');
+    if (!CTC_DB){ alert('Not connected — open the published dashboard to add expenses.'); return; }
+    if (!dateEl.value || !vehicleEl.value || !costEl.value){ alert('Date, vehicle and cost are required.'); return; }
+    CTC_DB.collection('ctc-expenses').add({
+      date: dateEl.value, reg: vehicleEl.value, type: typeEl.value, cost: Number(costEl.value), desc: descEl.value || ''
+    }).then(function(){
+      costEl.value = ''; descEl.value = '';
+    }).catch(function(err){
+      alert('Add failed: ' + (err && err.message ? err.message : 'unknown error'));
+    });
+  });
+
+  ctcPopulateExpenseVehicleSelect();
+  renderCostToCompany();
+  ctcInitDb();
+
   /* ---------------- Speeding ---------------- */
   function renderSpeedingKpis(){
     var veh = SP.byVehicle || [];
@@ -2516,6 +2852,7 @@
     fuelefficiency: { eyebrow: 'Analytics', title: 'Fuel Efficiency', subtitle: 'Litres per 100km, fuel-card litres against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     flagged: { eyebrow: 'Analytics', title: 'Flagged Vehicles', subtitle: 'Every vehicle currently over its fuel threshold, speeding, or driving harshly, in one exception list.', filters: false },
     geotag: { eyebrow: 'Analytics', title: 'Geotag', subtitle: 'Time spent inside Cartrack geofenced areas, once job-site zones are set up in Fleetweb.', filters: false },
+    costcompany: { eyebrow: 'Analytics', title: 'Cost to Company', subtitle: 'All-in cost per km — fuel, tyres/services, insurance and depreciation — by vehicle and division.', filters: false },
   };
   var origSubtitle = document.getElementById('section-subtitle').textContent;
   document.querySelectorAll('.navitem').forEach(function(btn){
@@ -2549,6 +2886,7 @@
     renderFuelEfficiencyTable();
     renderFlaggedVehicles();
     renderGeotag();
+    renderCostToCompany();
   }
 
   renderCartrackAll();
