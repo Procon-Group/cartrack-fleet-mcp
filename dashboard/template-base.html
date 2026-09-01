@@ -493,6 +493,11 @@
     Cost / KM
     <span class="gap-badge" id="nav-costperkm-badge" style="display:none;"></span>
   </button>
+  <button class="tab navitem" data-tab="speeding">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><path d="M12 12l4-3"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+    Speeding
+    <span class="gap-badge" id="nav-speeding-badge" style="display:none;"></span>
+  </button>
 </nav>
 
 <div class="app">
@@ -772,6 +777,55 @@
     </div>
     <div class="note-box" style="margin-top:12px;">
       <b>How this is calculated:</b> km comes from Cartrack trip distances for the target month (odometer-delta history isn't accumulated far back enough yet — this will switch over automatically once enough daily readings exist). Flags trigger at a 15% deviation, checked two ways: against that vehicle's own trailing average, and against the average for its division. A vehicle can be flagged on one, both, or neither.
+    </div>
+  </div>
+
+  <!-- SPEEDING -->
+  <div class="view" data-view="speeding">
+    <div class="kpi-row" id="sp-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Top vehicles by speeding events</div>
+          <div class="card-note">Road-limit speeding, last 30 days</div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart-speedbar" width="100%" height="320" viewBox="0 0 460 320" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">By vehicle</div>
+            <div class="card-note">Only vehicles with at least one speeding event</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="sp-vehicle-table">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">By driver</div>
+            <div class="card-note">Only drivers with at least one speeding event</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="sp-driver-table">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:12px;">
+      <b>Two speeding measures:</b> <i>road-limit</i> events are speed over the actual road's posted limit; <i>fleet-threshold</i> events are speed over a flat threshold configured in Fleetweb (if configured — may read zero if that feature isn't set up on this account). Both are shown since they catch different things.
     </div>
   </div>
 
@@ -1596,6 +1650,7 @@
   var TH = CARTRACK.tripHistory || [];
   var OV = CARTRACK.overview || { topDriversByHarshEvents: [], idleVsDriving: [], dailyActivity: [] };
   var CK = CARTRACK.costPerKm || { rows: [] };
+  var SP = CARTRACK.speeding || { byVehicle: [], byDriver: [] };
   var COVERAGE = CARTRACK.coverage || {};
   var FLEET = JSON.parse(document.getElementById('fleet-data').textContent).vehicles || {};
   var svgNS = 'http://www.w3.org/2000/svg';
@@ -1636,7 +1691,7 @@
     return '<span class="pill pill-muted"><span class="pdot"></span>Offline</span>';
   }
 
-  var state = { thPage: 1, thPageSize: 40 };
+  var state = { thPage: 1, thPageSize: 40, thOpenTripId: null };
 
   /* ---------------- Live Status ---------------- */
   function renderLiveStatusKpis(){
@@ -1707,15 +1762,47 @@
     }).join('');
   }
 
+  function tripDrawerHtml(t){
+    var harshItems = [
+      ['Harsh braking', t.harshBraking],
+      ['Harsh cornering', t.harshCornering],
+      ['Harsh acceleration', t.harshAccel],
+    ];
+    var speedItems = [
+      ['Road-limit speeding events', t.roadSpeedingEvents],
+      ['Road-limit speeding time', n1(t.roadSpeedingDurationMin) + ' min'],
+      ['Fleet-threshold speeding events', t.thresholdSpeedingEvents],
+      ['Fleet-threshold speeding time', n1(t.thresholdSpeedingDurationMin) + ' min'],
+      ['Max speed reached', t.maxSpeed==null ? '—' : n0(t.maxSpeed) + ' km/h'],
+    ];
+    function statBlock(title, items){
+      return '<div class="drawer-chart" style="min-width:220px;">'
+        + '<div class="drawer-chart-title">'+esc(title)+'</div>'
+        + '<div class="drawer-stats">'
+        + items.map(function(it){ return '<div><span>'+esc(it[0])+'</span><b>'+esc(it[1])+'</b></div>'; }).join('')
+        + '</div></div>';
+    }
+    return '<div class="drawer-inner">'
+      + statBlock('Driving behaviour', harshItems)
+      + statBlock('Speed', speedItems)
+      + '</div>';
+  }
+
   function renderTripHistoryTable(){
     var table = document.getElementById('th-table');
-    var head = ['Start','Vehicle','Route','Distance','Duration','Idle','Harsh events','Driver'];
-    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+h+'</th>'; }).join('');
+    var head = ['','Start','Vehicle','Route','Distance','Duration','Idle','Harsh events','Speeding','Driver'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
     var start = (state.thPage - 1) * state.thPageSize;
     var page = TH.slice(start, start + state.thPageSize);
-    table.querySelector('tbody').innerHTML = page.map(function(t){
+    var COLS = head.length;
+    var rows = [];
+    page.forEach(function(t){
       var harsh = t.harshBraking + t.harshCornering + t.harshAccel;
-      return '<tr>'
+      var speeding = t.roadSpeedingEvents + t.thresholdSpeedingEvents;
+      var open = state.thOpenTripId === t.tripId;
+      rows.push(
+        '<tr class="rowline" data-trip-id="'+esc(t.tripId)+'" data-open="'+open+'" tabindex="0">'
+        + '<td style="width:18px; color:var(--ink-muted);">'+(open?'▾':'▸')+'</td>'
         + '<td class="tnum">'+esc(t.start)+'</td>'
         + '<td><span class="plate">'+esc(t.reg)+'</span></td>'
         + '<td style="max-width:220px; overflow:hidden; text-overflow:ellipsis;">'+esc(t.startLocation)+' → '+esc(t.endLocation)+'</td>'
@@ -1723,11 +1810,25 @@
         + '<td class="num tnum">'+n0(t.durationMin)+' min</td>'
         + '<td class="num tnum">'+n0(t.idleMin)+' min</td>'
         + '<td class="num">'+(harsh>0?'<span class="pill pill-warning">'+harsh+'</span>':'<span style="color:var(--ink-muted);">0</span>')+'</td>'
+        + '<td class="num">'+(speeding>0?'<span class="pill pill-critical">'+speeding+'</span>':'<span style="color:var(--ink-muted);">0</span>')+'</td>'
         + '<td>'+esc(t.driver||'—')+'</td>'
-        + '</tr>';
-    }).join('');
+        + '</tr>'
+      );
+      if (open){
+        rows.push('<tr class="drawer-row"><td colspan="'+COLS+'">'+tripDrawerHtml(t)+'</td></tr>');
+      }
+    });
+    table.querySelector('tbody').innerHTML = rows.join('');
+    Array.prototype.forEach.call(table.querySelectorAll('tr.rowline'), function(tr){
+      tr.addEventListener('click', function(){
+        var id = Number(tr.getAttribute('data-trip-id'));
+        state.thOpenTripId = state.thOpenTripId === id ? null : id;
+        renderTripHistoryTable();
+      });
+      tr.addEventListener('keydown', function(e){ if (e.key==='Enter' || e.key===' '){ e.preventDefault(); tr.click(); } });
+    });
     var pages = Math.max(1, Math.ceil(TH.length / state.thPageSize));
-    document.getElementById('th-count-label').textContent = TH.length + ' trips';
+    document.getElementById('th-count-label').textContent = TH.length + ' trips — click a row for driving-behaviour and speeding detail';
     document.getElementById('th-page-label').textContent = state.thPage + ' / ' + pages;
     document.getElementById('th-prev').disabled = state.thPage <= 1;
     document.getElementById('th-next').disabled = state.thPage >= pages;
@@ -1852,6 +1953,7 @@
       ['grad-chart-idlebar-0', 'var(--warning)'],
       ['grad-chart-idlebar-1', 'var(--accent)'],
       ['grad-chart-idlepertrip-0', 'var(--critical)'],
+      ['grad-chart-speedbar-0', 'var(--critical)'],
     ];
     specs.forEach(function(spec){
       var g = document.createElementNS(svgNS,'linearGradient');
@@ -1957,6 +2059,65 @@
       : 'No month with both fleet-card and Cartrack data yet';
   }
 
+  /* ---------------- Speeding ---------------- */
+  function renderSpeedingKpis(){
+    var veh = SP.byVehicle || [];
+    var totalRoad = veh.reduce(function(s,v){ return s+v.roadEvents; }, 0);
+    var totalThreshold = veh.reduce(function(s,v){ return s+v.thresholdEvents; }, 0);
+    var totalRoadMin = veh.reduce(function(s,v){ return s+v.roadMin; }, 0);
+    var topVehicle = veh.length ? veh[0] : null;
+    var cards = [
+      { label: 'Road-limit events', value: n0(totalRoad), critical: totalRoad > 0 },
+      { label: 'Fleet-threshold events', value: n0(totalThreshold), critical: totalThreshold > 0 },
+      { label: 'Time over road limit', value: n0(totalRoadMin) + ' min' },
+      { label: 'Worst vehicle', value: topVehicle ? topVehicle.reg : '—' },
+    ];
+    document.getElementById('sp-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
+    }).join('');
+    var badge = document.getElementById('nav-speeding-badge');
+    if (veh.length > 0){ badge.style.display = 'inline-block'; badge.textContent = veh.length; }
+  }
+
+  function renderSpeedingBarChart(){
+    ensureGradientDefs();
+    var sorted = [...(SP.byVehicle||[])].sort(function(a,b){ return b.roadEvents - a.roadEvents; });
+    renderHBarChart('chart-speedbar', sorted, ['roadEvents'], null, ' events');
+  }
+
+  function renderSpeedingVehicleTable(){
+    var table = document.getElementById('sp-vehicle-table');
+    var head = ['Vehicle','Road events','Road time','Threshold events','Threshold time','Max speed','Trips over limit'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var rows = [...(SP.byVehicle||[])].sort(function(a,b){ return b.roadEvents - a.roadEvents; });
+    table.querySelector('tbody').innerHTML = rows.length ? rows.map(function(r){
+      return '<tr>'
+        + '<td><span class="plate">'+esc(r.reg)+'</span></td>'
+        + '<td class="num tnum">'+n0(r.roadEvents)+'</td>'
+        + '<td class="num tnum">'+n1(r.roadMin)+' min</td>'
+        + '<td class="num tnum">'+n0(r.thresholdEvents)+'</td>'
+        + '<td class="num tnum">'+n1(r.thresholdMin)+' min</td>'
+        + '<td class="num tnum">'+(r.maxSpeed?n0(r.maxSpeed)+' km/h':'—')+'</td>'
+        + '<td class="num tnum">'+n0(r.tripsOverLimit)+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="7" style="text-align:center; color:var(--ink-muted); padding:24px;">No speeding events in the last 30 days</td></tr>';
+  }
+
+  function renderSpeedingDriverTable(){
+    var table = document.getElementById('sp-driver-table');
+    var head = ['Driver','Road events','Threshold events','Trips over limit'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var rows = [...(SP.byDriver||[])].sort(function(a,b){ return b.roadEvents - a.roadEvents; });
+    table.querySelector('tbody').innerHTML = rows.length ? rows.map(function(r){
+      return '<tr>'
+        + '<td>'+esc(r.driver||'—')+'</td>'
+        + '<td class="num tnum">'+n0(r.roadEvents)+'</td>'
+        + '<td class="num tnum">'+n0(r.thresholdEvents)+'</td>'
+        + '<td class="num tnum">'+n0(r.tripsOverLimit)+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="4" style="text-align:center; color:var(--ink-muted); padding:24px;">No speeding events in the last 30 days</td></tr>';
+  }
+
   /* ---------------- Section header + filter visibility per tab ---------------- */
   var SECTION_META = {
     overview: { eyebrow: 'Procon Electrical &amp; Steel', title: 'Fleet Fuel &amp; Expense Dashboard', subtitle: null, filters: true },
@@ -1966,6 +2127,7 @@
     triphistory: { eyebrow: 'Cartrack Telemetry', title: 'Trip History', subtitle: 'Every trip in the last 30 days — route, distance, idle time, driving behaviour.', filters: false },
     cartrackoverview: { eyebrow: 'Cartrack Telemetry', title: 'Cartrack Overview', subtitle: 'Fleet-wide driving behaviour, idle time and daily activity — last 30 days.', filters: false },
     costperkm: { eyebrow: 'Cartrack Telemetry', title: 'Cost per Kilometre', subtitle: 'Fleet-card spend measured against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
+    speeding: { eyebrow: 'Cartrack Telemetry', title: 'Speeding Report', subtitle: 'Road-limit and fleet-threshold speeding events by vehicle and driver — last 30 days.', filters: false },
   };
   var origSubtitle = document.getElementById('section-subtitle').textContent;
   document.querySelectorAll('.navitem').forEach(function(btn){
@@ -1991,6 +2153,10 @@
     renderHeatmap();
     renderCostPerKmKpis();
     renderCostPerKmTable();
+    renderSpeedingKpis();
+    renderSpeedingBarChart();
+    renderSpeedingVehicleTable();
+    renderSpeedingDriverTable();
   }
 
   renderCartrackAll();

@@ -157,6 +157,11 @@ async function main() {
       harshBraking: t.harsh_braking_events ?? 0,
       harshCornering: t.harsh_cornering_events ?? 0,
       harshAccel: t.harsh_acceleration_events ?? 0,
+      roadSpeedingEvents: t.road_speeding_events ?? 0,
+      roadSpeedingDurationMin: t.road_speeding_duration_seconds ? Number((t.road_speeding_duration_seconds / 60).toFixed(1)) : 0,
+      thresholdSpeedingEvents: t.thresholds_speeding_events ?? 0,
+      thresholdSpeedingDurationMin: t.thresholds_speeding_duration_seconds ? Number((t.thresholds_speeding_duration_seconds / 60).toFixed(1)) : 0,
+      maxSpeed: t.max_speed ?? null,
       driver: [t.driver_name, t.driver_surname].filter(Boolean).join(" "),
     }));
 
@@ -164,6 +169,8 @@ async function main() {
   const harshByDriver = new Map<string, { accel: number; braking: number; cornering: number }>();
   const idleVsDriving = new Map<string, { idleSec: number; drivingSec: number; tripCount: number }>();
   const dailyActivity = new Map<string, Set<string>>(); // reg -> set of "YYYY-MM-DD" with a trip
+  const speedingByVehicle = new Map<string, { roadEvents: number; roadSec: number; thresholdEvents: number; thresholdSec: number; maxSpeed: number; tripsOverLimit: number }>();
+  const speedingByDriver = new Map<string, { roadEvents: number; thresholdEvents: number; tripsOverLimit: number }>();
 
   for (const t of allTrips) {
     const driver = [t.driver_name, t.driver_surname].filter(Boolean).join(" ");
@@ -183,6 +190,25 @@ async function main() {
     const day = t.start_timestamp.slice(0, 10);
     if (!dailyActivity.has(t.registration)) dailyActivity.set(t.registration, new Set());
     dailyActivity.get(t.registration)!.add(day);
+
+    const roadEvents = t.road_speeding_events ?? 0;
+    const thresholdEvents = t.thresholds_speeding_events ?? 0;
+    const sv = speedingByVehicle.get(t.registration) ?? { roadEvents: 0, roadSec: 0, thresholdEvents: 0, thresholdSec: 0, maxSpeed: 0, tripsOverLimit: 0 };
+    sv.roadEvents += roadEvents;
+    sv.roadSec += t.road_speeding_duration_seconds ?? 0;
+    sv.thresholdEvents += thresholdEvents;
+    sv.thresholdSec += t.thresholds_speeding_duration_seconds ?? 0;
+    sv.maxSpeed = Math.max(sv.maxSpeed, t.max_speed ?? 0);
+    if (roadEvents > 0 || thresholdEvents > 0) sv.tripsOverLimit += 1;
+    speedingByVehicle.set(t.registration, sv);
+
+    if (driver) {
+      const sd = speedingByDriver.get(driver) ?? { roadEvents: 0, thresholdEvents: 0, tripsOverLimit: 0 };
+      sd.roadEvents += roadEvents;
+      sd.thresholdEvents += thresholdEvents;
+      if (roadEvents > 0 || thresholdEvents > 0) sd.tripsOverLimit += 1;
+      speedingByDriver.set(driver, sd);
+    }
   }
 
   const topDriversByHarshEvents = [...harshByDriver.entries()]
@@ -203,6 +229,24 @@ async function main() {
     }
     return { reg, cells };
   });
+
+  const speedingByVehicleList = [...speedingByVehicle.entries()]
+    .map(([reg, v]) => ({
+      reg,
+      roadEvents: v.roadEvents,
+      roadMin: Number((v.roadSec / 60).toFixed(1)),
+      thresholdEvents: v.thresholdEvents,
+      thresholdMin: Number((v.thresholdSec / 60).toFixed(1)),
+      maxSpeed: Number(v.maxSpeed.toFixed(0)),
+      tripsOverLimit: v.tripsOverLimit,
+    }))
+    .filter((v) => v.roadEvents > 0 || v.thresholdEvents > 0)
+    .sort((a, b) => b.roadEvents - a.roadEvents);
+
+  const speedingByDriverList = [...speedingByDriver.entries()]
+    .map(([driver, v]) => ({ driver, ...v }))
+    .filter((v) => v.roadEvents > 0 || v.thresholdEvents > 0)
+    .sort((a, b) => b.roadEvents - a.roadEvents);
 
   // ---- Cost/KM Reconciliation ----
   // Target month = most recent month with any real fleet-card fuel cost in existing-fleet-data.json.
@@ -305,6 +349,10 @@ async function main() {
       topDriversByHarshEvents,
       idleVsDriving: idleVsDrivingList,
       dailyActivity: dailyActivityGrid,
+    },
+    speeding: {
+      byVehicle: speedingByVehicleList,
+      byDriver: speedingByDriverList,
     },
     costPerKm: {
       targetMonth: targetMonth ?? null,
