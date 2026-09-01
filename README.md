@@ -149,43 +149,66 @@ report the console output."* Since the whole sync — Cartrack calls, flag compu
 Sheet writes — happens inside the script (not via separate MCP tool calls from the cloud
 agent), the Routine just needs `Bash` access and the environment variables below.
 
-### API credentials for cloud Routines — read this before wiring one up
+### API credentials for cloud Routines — current status: not available yet
 
 A Routine's *environment variables* are readable by anyone who uses that Environment on
 claude.ai — fine for `GOOGLE_SHEET_ID`, not fine for a password. Anthropic's agent proxy
-supports a separate mechanism for exactly this case: an **API credential**, attached to
-outbound requests for hosts you list *after the request leaves the session* — the key never
-reaches the agent or the run log at all. That's what Cartrack auth uses:
+documents a mechanism for exactly this case: an **API credential**, attached to outbound
+requests for hosts you list *after the request leaves the session*, so the key never reaches
+the agent or the run log — see [Configure cloud
+environments](https://code.claude.com/docs/en/cloud-environments#add-api-credentials).
 
-1. From the credential vault (`API's/Enviroment secrets`), run `.\New-CartrackCredential.ps1`
-   — it builds the Basic-auth header value and copies it to the clipboard (never printed).
-2. At [claude.ai/code](https://claude.ai/code), open the Routine's Environment → **API
-   credentials** → **Add credential**: Allowed websites `fleetapi-na.cartrack.com`, header
-   name `Authorization`, prefix `Basic`, value from the clipboard.
-3. In the same Environment, set **Network access** to **Custom** and add to **Allowed
-   domains**: `fleetapi-na.cartrack.com` (Cartrack) and `sheets.googleapis.com`,
-   `www.googleapis.com`, `oauth2.googleapis.com` (Google Sheets/Drive — the `googleapis`
-   package hits all three). The default allowlist doesn't include any of these; requests to a
-   domain not listed fail with `403`.
+**Confirmed against this account on 2026-09-01: the feature doesn't actually appear in the
+UI.** Neither the "New cloud environment" dialog nor the "Edit cloud environment" dialog for
+an existing environment (hover the environment in the selector → gear icon on hover) shows an
+API credentials section, even though the docs say Pro/Max users hold the required role
+automatically and should see one. Checked both the create and edit flows directly — this is
+very likely a documented feature still in staged/research-preview rollout, not a
+misconfiguration on this account. **Check for it again before assuming it's still
+unavailable** — hover the environment, click the gear, look below "Environment variables."
 
-With that done, **do not set `CARTRACK_USERNAME`/`CARTRACK_PASSWORD` as environment variables
-anywhere** — `CartrackConfig` in `src/cartrackClient.ts` treats them as optional and skips
-building its own `Authorization` header when they're unset, so the proxy-injected one is used
-instead. Only set them (via the vault, loaded into your shell — never written to a file in
-this repo) for local/manual runs outside a Routine.
-
-The GCP service-account key doesn't have an equivalent proxy mechanism (it's a signing key, not
-a static header value), so it has to be an environment variable regardless — set these on the
-Environment:
+**Until it appears, Cartrack auth uses plain Environment variables instead** — the pragmatic
+fallback, accepted deliberately (see the "Use plain Environment variables now" decision) given
+this is a personal (not team/org) account, so "anyone using this environment" is just the
+account owner. Set these on the Environment (via the gear-icon edit dialog, `.env` format):
 
 ```
+CARTRACK_USERNAME
+CARTRACK_PASSWORD
+CARTRACK_BASE_URL
 GOOGLE_SHEET_ID
-GOOGLE_APPLICATION_CREDENTIALS (or the key's raw JSON contents under a different variable
-  name if the Environment only supports plain variables, not file uploads — the Routine's
-  prompt already tells the agent to write that content to a file first if so)
+GOOGLE_APPLICATION_CREDENTIALS_CONTENTS (raw JSON contents — the Environment can't see a
+  local file path, so this has to be the file's actual content, not a path. The Routine's
+  prompt tells the agent to write it to ./google-service-account.json, export
+  GOOGLE_APPLICATION_CREDENTIALS to that path, and delete the file again after the sync)
 FLEET_TIMEZONE_OFFSET_MINUTES=120
 ENABLE_GEOFENCE_FLAG=false
 ```
+
+`CartrackConfig` in `src/cartrackClient.ts` treats `username`/`password` as optional — if API
+credentials becomes available later, unset these three from the Environment, add the API
+credential instead, and the client automatically stops building its own `Authorization` header
+and relies on the proxy-injected one. No code change needed either way.
+
+Also set **Network access** to **Custom** and add to **Allowed domains** (needed regardless of
+which auth path Cartrack ends up using): `fleetapi-na.cartrack.com` (Cartrack) and
+`sheets.googleapis.com`, `www.googleapis.com`, `oauth2.googleapis.com` (Google Sheets/Drive —
+the `googleapis` package hits all three). The default allowlist doesn't include any of these;
+requests to a domain not listed fail with `403`.
+
+**Getting the actual credential values into the browser safely**: don't type or paste secret
+values through an AI-driven browser session — its clipboard is sandboxed and can't see the
+real OS clipboard anyway, so this doesn't actually work, and typing them directly would put
+the raw value in that session's own transcript. Build the `.env`-format block locally instead
+(reads from the vault, never printed):
+
+```powershell
+Set-Location "C:\Users\Quinton\Desktop\Claude Second Brain\API's\Enviroment secrets"
+.\Load-Secrets.ps1 cartrack -Quiet
+Set-Clipboard -Value "CARTRACK_USERNAME=$env:CARTRACK_USERNAME`nCARTRACK_PASSWORD=$env:CARTRACK_PASSWORD`nCARTRACK_BASE_URL=$env:CARTRACK_BASE_URL"
+```
+
+then paste into the Environment variables box in your own real browser.
 
 ### What it writes
 
