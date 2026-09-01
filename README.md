@@ -149,6 +149,38 @@ report the console output."* Since the whole sync — Cartrack calls, flag compu
 Sheet writes — happens inside the script (not via separate MCP tool calls from the cloud
 agent), the Routine just needs `Bash` access and the environment variables below.
 
+### Dashboard regeneration + publish (both Routines, since 2026-09-01)
+
+Both the daily and monthly Routines also run `npm run dashboard:generate && npm run
+dashboard:build`, then call the **Artifact** tool to republish `dashboard/preview.html` in
+place over the live "Procon Fleet Fuel Dashboard" artifact
+(`https://claude.ai/code/artifact/3b674af3-5d68-4117-9c66-0209d9b8bbd0`) — same `title` and
+`favicon` every time (`"Procon Fleet Fuel Dashboard"` / `🚚`), so it updates rather than
+forking into a new artifact. This is a second, independent step in each Routine's prompt —
+it still runs even if the sync/reconciliation half fails.
+
+**Confirmed live (not assumed) that a Routine session can call the Artifact tool** by firing
+a disposable diagnostic prompt through the daily trigger with `session_context.allowed_tools`
+temporarily set to `["Bash", "Artifact", "Skill"]` — it successfully listed the existing
+artifact and loaded the `artifact-design` skill. Routines default to `["Bash"]` only, so
+`allowed_tools` must include `Artifact` and `Skill` for this to work — check
+`job_config.ccr.session_context.allowed_tools` if the publish step starts failing with a
+"tool not available" style error.
+
+**No mode-splitting**: `generateDashboard.ts` doesn't distinguish a cheap daily run from an
+expensive monthly one — every run refetches the full 3-month per-vehicle window that backs
+Cost/KM, Fuel Efficiency, and the Vehicle Report's Cartrack columns (~26 vehicles × 3 months
+of trips), even though that window's fleet-card side (`existing-fleet-data.json`) only
+changes when someone manually re-extracts it from the master workbook — so most days it
+refetches data whose comparison values won't have moved. Deliberately kept simple rather than
+adding a `DASHBOARD_MODE=daily|full` flag with carry-forward-from-previous-run logic; revisit
+if the daily API call volume becomes a real cost/rate-limit concern.
+
+If `dashboard:generate` fails, the Routine prompt tells it to retry once, then skip the
+publish for that run rather than fail the whole Routine — a transient
+`ConnectTimeoutError` to `fleetapi-na.cartrack.com` has already happened once in testing and
+is not a code bug.
+
 ### API credentials for cloud Routines — current status: not available yet
 
 A Routine's *environment variables* are readable by anyone who uses that Environment on
