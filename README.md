@@ -35,13 +35,30 @@ npm run build
    and **Google Drive API**.
 2. Create a service account, generate a JSON key, save it as
    `google-service-account.json` in this folder (already gitignored).
-3. Create the **Procon Fleet — Live Dashboard** Google Sheet, share it with the service
-   account's `client_email` (found in the JSON key) as **Editor**.
-4. Set `GOOGLE_SHEET_ID` to that Sheet's ID (the long string in its URL) and
-   `GOOGLE_SERVICE_ACCOUNT_JSON` to the key file path.
+3. **Create a Shared Drive** (Google Drive -> New -> Shared Drive), e.g. "Procon Fleet
+   Dashboard", and add the service account's `client_email` (from the JSON key) as a member
+   with **Content Manager** access.
 
-Tabs (`Vehicle Status`, `Trips`, `Fuel`, `Flags`, `Monthly Reconciliation`) are created
-automatically on first run if they don't already exist.
+   This step isn't optional if you want automated creation: service accounts have **zero
+   personal Drive storage quota** under Google's current policy, so they cannot create new
+   files (a new Sheet, a monthly `.xlsx` export) unless the file lives inside a Shared Drive,
+   where storage is billed to the Drive rather than the account. This shows up as a
+   `403 "The caller does not have permission"` error that has nothing to do with API
+   enablement or auth being wrong — confirmed the hard way against a real project.
+4. Grab the Shared Drive's ID from its URL when you open it
+   (`drive.google.com/drive/folders/<id>`).
+5. Run the setup script to create the dashboard Sheet inside that Shared Drive, share it
+   with your own account, and pre-create every tab:
+   ```bash
+   npm run setup:sheet -- <sharedDriveId> you@procongroup.co
+   ```
+   It prints the new Sheet's ID — set that as `GOOGLE_SHEET_ID` in `.env`.
+6. If you want the monthly `.xlsx` export, create a folder inside the same Shared Drive and
+   set `GOOGLE_EXPORT_FOLDER_ID` to its ID.
+
+Tabs (`Vehicle Status`, `Trips`, `Fuel`, `Flags`, `Monthly Reconciliation`) are created by
+`setup:sheet`; `ensureTabs()` also creates any that are still missing on every sync run, so
+it's safe if you add a tab by hand later.
 
 ### Registering the MCP server with Claude Code (local/interactive use)
 

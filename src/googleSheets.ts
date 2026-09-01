@@ -96,7 +96,13 @@ function driveAuth(config: SheetsConfig, scopes: string[]) {
   return new google.auth.JWT({ email: key.client_email, key: key.private_key, scopes });
 }
 
-/** Exports the whole spreadsheet to .xlsx bytes via the Drive export endpoint. */
+/**
+ * Exports the whole spreadsheet to .xlsx bytes via the Drive export endpoint.
+ * `supportsAllDrives` is required on every Drive v3 call below that touches a Shared Drive
+ * item — service accounts have zero personal Drive storage quota (Google's current policy),
+ * so anything they read/write/create has to live in a Shared Drive, and Drive v3 silently
+ * excludes Shared Drive items from calls missing this flag rather than erroring clearly.
+ */
 export async function exportSpreadsheetToXlsxBuffer(config: SheetsConfig): Promise<Buffer> {
   const drive = google.drive({ version: "v3", auth: driveAuth(config, ["https://www.googleapis.com/auth/drive.readonly"]) });
   const res = await drive.files.export(
@@ -109,7 +115,9 @@ export async function exportSpreadsheetToXlsxBuffer(config: SheetsConfig): Promi
 /**
  * Uploads a buffer as a new file in a Drive folder — used for the monthly .xlsx export
  * (a cloud Routine's local filesystem isn't visible to the user afterward, so the export
- * has to land in Drive, not disk).
+ * has to land in Drive, not disk). The folder MUST be inside a Shared Drive — creating a new
+ * file as a service account fails outside one (zero storage quota), even in a folder a human
+ * owns and has shared with it.
  */
 export async function uploadFileToDriveFolder(
   config: SheetsConfig,
@@ -123,6 +131,7 @@ export async function uploadFileToDriveFolder(
     requestBody: { name: fileName, parents: [folderId] },
     media: { mimeType, body: bufferToStream(content) },
     fields: "id, webViewLink",
+    supportsAllDrives: true,
   });
   return res.data.webViewLink ?? res.data.id ?? "";
 }
@@ -130,7 +139,7 @@ export async function uploadFileToDriveFolder(
 /** Downloads a Drive file's raw bytes (used to read the master fleet workbook, read-only). */
 export async function downloadDriveFile(config: SheetsConfig, fileId: string): Promise<Buffer> {
   const drive = google.drive({ version: "v3", auth: driveAuth(config, ["https://www.googleapis.com/auth/drive.readonly"]) });
-  const res = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+  const res = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer" });
   return Buffer.from(res.data as ArrayBuffer);
 }
 
