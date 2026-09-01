@@ -20,6 +20,11 @@ const TABS = {
 const WORK_HOURS_START = 7; // local hour, 07:00
 const WORK_HOURS_END = 17; // local hour, 17:00
 const FUEL_ANOMALY_DEVIATION = 0.5; // flag if today's litres deviate >50% from the vehicle's trailing average
+// Off by default: confirmed live against Procon's account that no geofences are set up in
+// Fleetweb yet, so this flags literally every trip (239/245 flags on the first real run) —
+// pure noise that drowns out the flags that are actually useful. Set to "true" once job-site
+// geofences exist in Fleetweb.
+const ENABLE_GEOFENCE_FLAG = process.env.ENABLE_GEOFENCE_FLAG === "true";
 
 async function main() {
   const cartrack = new CartrackClient(loadConfigFromEnv());
@@ -143,11 +148,14 @@ async function computeFlags(
   }
 
   // 2. Trips with no obvious job-site match (no geofence matched at either end).
-  for (const t of trips) {
-    const startGeo = t.start_geofence_name;
-    const endGeo = t.end_geofence_name;
-    if (!startGeo && !endGeo) {
-      flags.push({ type: "No job-site match", registration: t.registration, detail: `Trip ${t.trip_id} (${t.start_timestamp} -> ${t.end_timestamp}) matched no geofence at either end.` });
+  //    Requires geofences to actually exist in Fleetweb — see ENABLE_GEOFENCE_FLAG above.
+  if (ENABLE_GEOFENCE_FLAG) {
+    for (const t of trips) {
+      const startGeo = t.start_geofence_name;
+      const endGeo = t.end_geofence_name;
+      if (!startGeo && !endGeo) {
+        flags.push({ type: "No job-site match", registration: t.registration, detail: `Trip ${t.trip_id} (${t.start_timestamp} -> ${t.end_timestamp}) matched no geofence at either end.` });
+      }
     }
   }
 
