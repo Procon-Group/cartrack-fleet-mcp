@@ -15,6 +15,7 @@
     "setup:tabs": "node dist/scripts/initDashboardTabs.js",
     "sync:daily": "node dist/scripts/syncDaily.js",
     "sync:monthly": "node dist/scripts/syncMonthly.js",
+    "dashboard:generate": "node dist/scripts/generateDashboard.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

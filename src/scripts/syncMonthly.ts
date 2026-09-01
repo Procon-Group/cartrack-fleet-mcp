@@ -27,6 +27,7 @@ import {
   uploadFileToDriveFolder,
   overwriteDriveFileContent,
 } from "../googleSheets.js";
+import { findByPlate } from "../plateMatch.js";
 
 const TOLERANCE = Number(process.env.CARTRACK_VARIANCE_TOLERANCE ?? "0.05");
 const RECON_TAB = "Monthly Reconciliation";
@@ -112,28 +113,11 @@ async function readWorkbookFuelTotals(fileId: string, monthLabel: string): Promi
   return totals;
 }
 
-/**
- * Cartrack's registrations are sometimes driver-name-prefixed (e.g. "OTTO-N176274W"), while
- * the fleet workbook's Fleet Register/Fuel Log use the plain plate ("N176274W") — confirmed
- * against real data from both sides on 2026-09-01. Normalize by stripping non-alphanumerics,
- * then match exactly or by suffix (the Cartrack side ending in the workbook's plate).
- */
-function normalizePlate(reg: string): string {
-  return reg.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 function findCardTotal(
   cartrackRegistration: string,
   cardTotals: Map<string, { litres: number; rand: number }>,
 ): { litres: number; rand: number } | undefined {
-  const normalizedCartrack = normalizePlate(cartrackRegistration);
-  for (const [workbookReg, total] of cardTotals) {
-    const normalizedWorkbook = normalizePlate(workbookReg);
-    if (normalizedCartrack === normalizedWorkbook || normalizedCartrack.endsWith(normalizedWorkbook)) {
-      return total;
-    }
-  }
-  return undefined;
+  return findByPlate(cartrackRegistration, cardTotals);
 }
 
 function toMonthLabel(value: unknown): string {
