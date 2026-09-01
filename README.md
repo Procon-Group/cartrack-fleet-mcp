@@ -22,12 +22,24 @@ npm run build
 
 ### Cartrack credentials
 
-1. Log into Fleetweb -> Settings -> API Settings -> Generate User Credentials.
-2. Set `CARTRACK_USERNAME` / `CARTRACK_PASSWORD` in `.env`.
-3. `CARTRACK_BASE_URL` — confirmed from Cartrack's own docs (base-url page): Namibia has
-   its own country code (`na`), so this is `https://fleetapi-na.cartrack.com/rest`
-   (already set as the default in `.env.example`). Cartrack has ~26 per-country hosts total,
-   all shaped `https://fleetapi-<cc>.cartrack.com/rest`.
+`CARTRACK_USERNAME`/`CARTRACK_PASSWORD` are **deliberately optional** (see `CartrackConfig` in
+`src/cartrackClient.ts`) and should stay blank in `.env` and `.env.example` — real credentials
+never belong in this repo, tracked or not. `CARTRACK_BASE_URL` is not secret and stays filled
+in (`https://fleetapi-na.cartrack.com/rest` — confirmed from Cartrack's docs: Namibia has its
+own country code `na`, not South Africa's; Cartrack has ~26 per-country hosts total, all
+shaped `https://fleetapi-<cc>.cartrack.com/rest`).
+
+This machine keeps real credentials in a separate vault, not in this repo:
+`C:\Users\Quinton\Desktop\Claude Second Brain\API's\Enviroment secrets` (read that folder's
+own `CLAUDE.md`/`README.md` first). For a **local** run:
+
+```powershell
+& "...\Enviroment secrets\Load-Secrets.ps1" cartrack -Quiet   # loads into this shell session
+node --env-file=.env dist/scripts/syncDaily.js
+```
+
+For the **cloud Routine**, Cartrack access is not an environment variable at all — see
+"API credentials for cloud Routines" below.
 
 ### Google Sheets/Drive (service account — no OAuth, works unattended)
 
@@ -137,22 +149,43 @@ report the console output."* Since the whole sync — Cartrack calls, flag compu
 Sheet writes — happens inside the script (not via separate MCP tool calls from the cloud
 agent), the Routine just needs `Bash` access and the environment variables below.
 
-**Open question you'll need to resolve in the Routine's Environment settings at
-claude.ai/code/routines**: this session's tools don't expose how CCR environments store
-secrets (they're clearly not read from a local `.env` — cloud Routines can't see your local
-filesystem or shell environment at all). Set these as environment variables on whichever
-Environment the Routine uses:
+### API credentials for cloud Routines — read this before wiring one up
+
+A Routine's *environment variables* are readable by anyone who uses that Environment on
+claude.ai — fine for `GOOGLE_SHEET_ID`, not fine for a password. Anthropic's agent proxy
+supports a separate mechanism for exactly this case: an **API credential**, attached to
+outbound requests for hosts you list *after the request leaves the session* — the key never
+reaches the agent or the run log at all. That's what Cartrack auth uses:
+
+1. From the credential vault (`API's/Enviroment secrets`), run `.\New-CartrackCredential.ps1`
+   — it builds the Basic-auth header value and copies it to the clipboard (never printed).
+2. At [claude.ai/code](https://claude.ai/code), open the Routine's Environment → **API
+   credentials** → **Add credential**: Allowed websites `fleetapi-na.cartrack.com`, header
+   name `Authorization`, prefix `Basic`, value from the clipboard.
+3. In the same Environment, set **Network access** to **Custom** and add to **Allowed
+   domains**: `fleetapi-na.cartrack.com` (Cartrack) and `sheets.googleapis.com`,
+   `www.googleapis.com`, `oauth2.googleapis.com` (Google Sheets/Drive — the `googleapis`
+   package hits all three). The default allowlist doesn't include any of these; requests to a
+   domain not listed fail with `403`.
+
+With that done, **do not set `CARTRACK_USERNAME`/`CARTRACK_PASSWORD` as environment variables
+anywhere** — `CartrackConfig` in `src/cartrackClient.ts` treats them as optional and skips
+building its own `Authorization` header when they're unset, so the proxy-injected one is used
+instead. Only set them (via the vault, loaded into your shell — never written to a file in
+this repo) for local/manual runs outside a Routine.
+
+The GCP service-account key doesn't have an equivalent proxy mechanism (it's a signing key, not
+a static header value), so it has to be an environment variable regardless — set these on the
+Environment:
 
 ```
-CARTRACK_USERNAME, CARTRACK_PASSWORD, CARTRACK_BASE_URL,
-GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON (or the key contents, if the environment
-  only supports variables — you may need to adapt googleSheets.ts to read the key from an
-  env var instead of a file path, e.g. GOOGLE_SERVICE_ACCOUNT_JSON_CONTENTS)
+GOOGLE_SHEET_ID
+GOOGLE_APPLICATION_CREDENTIALS (or the key's raw JSON contents under a different variable
+  name if the Environment only supports plain variables, not file uploads — the Routine's
+  prompt already tells the agent to write that content to a file first if so)
+FLEET_TIMEZONE_OFFSET_MINUTES=120
+ENABLE_GEOFENCE_FLAG=false
 ```
-
-If the Environment has no secrets mechanism at all, the fallback is to commit an
-*encrypted* key and decrypt it in the script with a passphrase env var — worse, and only
-do it if there's truly no other option. Check the claude.ai UI first.
 
 ### What it writes
 
