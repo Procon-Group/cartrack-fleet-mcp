@@ -1,21 +1,28 @@
 import { ApiErrorBody, CartrackApiError, PaginationMeta } from "./types.js";
 
 export interface CartrackConfig {
-  username: string;
-  password: string;
-  baseUrl: string; // e.g. https://fleetapi-za.cartrack.com/rest
+  // Optional on purpose: when running as a Claude Code cloud Routine, auth is attached by
+  // Anthropic's agent proxy via an "API credential" scoped to the Cartrack host, after the
+  // request leaves the session — the raw username/password never reaches the routine's
+  // environment. Only set these for local/manual runs, where the client builds the Basic
+  // auth header itself. See "API credentials for cloud Routines" in the README.
+  username?: string;
+  password?: string;
+  baseUrl: string; // e.g. https://fleetapi-na.cartrack.com/rest
 }
 
 export function loadConfigFromEnv(): CartrackConfig {
   const username = process.env.CARTRACK_USERNAME;
   const password = process.env.CARTRACK_PASSWORD;
   const baseUrl = process.env.CARTRACK_BASE_URL;
-  if (!username || !password || !baseUrl) {
+  if (!baseUrl) {
     throw new Error(
-      "Missing Cartrack credentials. Set CARTRACK_USERNAME, CARTRACK_PASSWORD and CARTRACK_BASE_URL " +
-        "(see .env.example). CARTRACK_BASE_URL is the region-specific host from the Cartrack developer " +
-        "portal, e.g. https://fleetapi-za.cartrack.com/rest.",
+      "Missing CARTRACK_BASE_URL (see .env.example). This is required even when auth is supplied " +
+        "via a cloud Routine's API credential, since the client still needs to know which host to call.",
     );
+  }
+  if ((username && !password) || (!username && password)) {
+    throw new Error("Set both CARTRACK_USERNAME and CARTRACK_PASSWORD, or neither (relying on a Routine API credential instead) — not just one.");
   }
   return { username, password, baseUrl };
 }
@@ -54,7 +61,9 @@ export const limiters = {
 export class CartrackClient {
   constructor(private config: CartrackConfig) {}
 
-  private authHeader(): string {
+  /** Undefined when relying on a Routine's proxy-injected API credential instead of a local login. */
+  private authHeader(): string | undefined {
+    if (!this.config.username || !this.config.password) return undefined;
     const token = Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64");
     return `Basic ${token}`;
   }
@@ -71,10 +80,9 @@ export class CartrackClient {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
 
-    const headers: Record<string, string> = {
-      Authorization: this.authHeader(),
-      Accept: "application/json",
-    };
+    const headers: Record<string, string> = { Accept: "application/json" };
+    const auth = this.authHeader();
+    if (auth) headers.Authorization = auth; // omitted entirely when relying on a Routine API credential
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
     const doFetch = async (): Promise<Response> =>

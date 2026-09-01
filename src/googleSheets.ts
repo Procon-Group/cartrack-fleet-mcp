@@ -11,10 +11,13 @@ export interface SheetsConfig {
 
 export function loadSheetsConfigFromEnv(): SheetsConfig {
   const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-  const serviceAccountKeyPath = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  // GOOGLE_APPLICATION_CREDENTIALS is Google's own standard name (what gcloud/client libraries
+  // read automatically) — preferred. GOOGLE_SERVICE_ACCOUNT_JSON is kept as a fallback for
+  // anyone who already set that name.
+  const serviceAccountKeyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ?? process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!spreadsheetId || !serviceAccountKeyPath) {
     throw new Error(
-      "Missing Google Sheets config. Set GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON (see .env.example). " +
+      "Missing Google Sheets config. Set GOOGLE_SHEET_ID and GOOGLE_APPLICATION_CREDENTIALS (see .env.example). " +
         "The target Sheet must be shared with the service account's client_email as Editor.",
     );
   }
