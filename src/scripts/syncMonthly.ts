@@ -19,7 +19,14 @@
  */
 import ExcelJS from "exceljs";
 import { CartrackClient, loadConfigFromEnv } from "../cartrackClient.js";
-import { SheetsWriter, loadSheetsConfigFromEnv, downloadDriveFile, exportSpreadsheetToXlsxBuffer, uploadFileToDriveFolder } from "../googleSheets.js";
+import {
+  SheetsWriter,
+  loadSheetsConfigFromEnv,
+  downloadDriveFile,
+  exportSpreadsheetToXlsxBuffer,
+  uploadFileToDriveFolder,
+  overwriteDriveFileContent,
+} from "../googleSheets.js";
 
 const TOLERANCE = Number(process.env.CARTRACK_VARIANCE_TOLERANCE ?? "0.05");
 const RECON_TAB = "Monthly Reconciliation";
@@ -139,7 +146,8 @@ async function main() {
 
   console.log(`Reconciled ${rows.length} vehicles for ${label}. Flagged (>${(TOLERANCE * 100).toFixed(0)}% variance): ${flaggedCount}.`);
 
-  const exportFolderId = process.env.GOOGLE_EXPORT_FOLDER_ID;
+  const exportFolderId = process.env.GOOGLE_EXPORT_FOLDER_ID; // Shared Drive folder — a new dated file per month
+  const exportFileId = process.env.GOOGLE_EXPORT_FILE_ID; // fallback: one recurring file, content overwritten each month
   if (exportFolderId) {
     const buffer = await exportSpreadsheetToXlsxBuffer(sheetsConfig);
     const fileName = `Procon Fleet — Live Dashboard - ${label}.xlsx`;
@@ -151,8 +159,17 @@ async function main() {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     console.log(`Monthly .xlsx export uploaded: ${fileName} -> ${link}`);
+  } else if (exportFileId) {
+    const buffer = await exportSpreadsheetToXlsxBuffer(sheetsConfig);
+    const link = await overwriteDriveFileContent(
+      sheetsConfig,
+      exportFileId,
+      buffer,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    console.log(`Monthly .xlsx export overwritten (${label} snapshot) -> ${link}`);
   } else {
-    console.log("GOOGLE_EXPORT_FOLDER_ID not set — skipping monthly .xlsx export.");
+    console.log("Neither GOOGLE_EXPORT_FOLDER_ID nor GOOGLE_EXPORT_FILE_ID set — skipping monthly .xlsx export.");
   }
 }
 

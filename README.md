@@ -35,30 +35,48 @@ npm run build
    and **Google Drive API**.
 2. Create a service account, generate a JSON key, save it as
    `google-service-account.json` in this folder (already gitignored).
-3. **Create a Shared Drive** (Google Drive -> New -> Shared Drive), e.g. "Procon Fleet
-   Dashboard", and add the service account's `client_email` (from the JSON key) as a member
-   with **Content Manager** access.
 
-   This step isn't optional if you want automated creation: service accounts have **zero
-   personal Drive storage quota** under Google's current policy, so they cannot create new
-   files (a new Sheet, a monthly `.xlsx` export) unless the file lives inside a Shared Drive,
-   where storage is billed to the Drive rather than the account. This shows up as a
-   `403 "The caller does not have permission"` error that has nothing to do with API
-   enablement or auth being wrong — confirmed the hard way against a real project.
+**Important**: service accounts have **zero personal Drive storage quota** under Google's
+current policy — they cannot create new files (a new Sheet, a new dated monthly `.xlsx`
+export) at all unless the file lives inside a Google Workspace **Shared Drive**, where
+storage is billed to the Drive rather than the account. This shows up as a
+`403 "The caller does not have permission"` error that has nothing to do with API enablement
+or auth being wrong — confirmed the hard way against a real project. Two paths from here,
+depending on whether you have a Shared Drive available:
+
+**Path A — you have a Shared Drive** (or can create one):
+
+3. Google Drive -> New -> Shared Drive, e.g. "Procon Fleet Dashboard", then add the service
+   account's `client_email` as a member with **Content Manager** access.
 4. Grab the Shared Drive's ID from its URL when you open it
    (`drive.google.com/drive/folders/<id>`).
-5. Run the setup script to create the dashboard Sheet inside that Shared Drive, share it
-   with your own account, and pre-create every tab:
+5. Run the setup script — creates the dashboard Sheet inside that Shared Drive, shares it
+   with your own account, and pre-creates every tab:
    ```bash
    npm run setup:sheet -- <sharedDriveId> you@procongroup.co
    ```
    It prints the new Sheet's ID — set that as `GOOGLE_SHEET_ID` in `.env`.
-6. If you want the monthly `.xlsx` export, create a folder inside the same Shared Drive and
-   set `GOOGLE_EXPORT_FOLDER_ID` to its ID.
+6. For the monthly `.xlsx` export as a new dated file each month, create a folder inside the
+   same Shared Drive and set `GOOGLE_EXPORT_FOLDER_ID` to its ID.
+
+**Path B — no Shared Drive available** (e.g. Workspace access issues, or plain personal
+Gmail): a human-owned file has normal storage quota, so writing rows into a Sheet *you*
+already created and shared isn't "creating a file" in the quota sense — only the service
+account creating a brand-new file hits the wall.
+
+3. Create the "Procon Fleet — Live Dashboard" Sheet yourself (sheets.new), share it with the
+   service account's `client_email` as **Editor**.
+4. Set `GOOGLE_SHEET_ID` to that Sheet's ID (the long string in its URL).
+5. Run `npm run setup:tabs` to pre-create every tab with headers.
+6. For the monthly `.xlsx` export, create one placeholder `.xlsx` file yourself (any content),
+   share it with the service account as Editor, and set `GOOGLE_EXPORT_FILE_ID` to its ID.
+   Its content gets overwritten with the latest month's numbers each run — one recurring file
+   with the latest snapshot, not a dated file per month (that trade-off is the price of not
+   having a Shared Drive; switch to Path A later if that changes).
 
 Tabs (`Vehicle Status`, `Trips`, `Fuel`, `Flags`, `Monthly Reconciliation`) are created by
-`setup:sheet`; `ensureTabs()` also creates any that are still missing on every sync run, so
-it's safe if you add a tab by hand later.
+either setup script; `ensureTabs()` also creates any that are still missing on every sync
+run, so it's safe if you add a tab by hand later.
 
 ### Registering the MCP server with Claude Code (local/interactive use)
 

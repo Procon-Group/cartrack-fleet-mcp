@@ -12,6 +12,7 @@
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "setup:sheet": "node dist/scripts/setupDashboardSheet.js",
+    "setup:tabs": "node dist/scripts/initDashboardTabs.js",
     "sync:daily": "node dist/scripts/syncDaily.js",
     "sync:monthly": "node dist/scripts/syncMonthly.js",
     "typecheck": "tsc --noEmit"

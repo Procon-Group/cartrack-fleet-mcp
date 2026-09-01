@@ -136,6 +136,29 @@ export async function uploadFileToDriveFolder(
   return res.data.webViewLink ?? res.data.id ?? "";
 }
 
+/**
+ * Overwrites an EXISTING Drive file's content — the fallback when there's no Shared Drive
+ * available. A human creates one placeholder file once (any content, even empty), shares it
+ * with the service account as Editor, and every month's export replaces its content in place.
+ * This works with zero service-account storage quota because it's an update to a file the
+ * human already owns, not new-file creation — the tradeoff is one recurring file with the
+ * latest month's numbers, not a dated file per month.
+ */
+export async function overwriteDriveFileContent(
+  config: SheetsConfig,
+  fileId: string,
+  content: Buffer,
+  mimeType: string,
+): Promise<string> {
+  const drive = google.drive({ version: "v3", auth: driveAuth(config, ["https://www.googleapis.com/auth/drive.file"]) });
+  const res = await drive.files.update({
+    fileId,
+    media: { mimeType, body: bufferToStream(content) },
+    fields: "id, webViewLink",
+  });
+  return res.data.webViewLink ?? res.data.id ?? "";
+}
+
 /** Downloads a Drive file's raw bytes (used to read the master fleet workbook, read-only). */
 export async function downloadDriveFile(config: SheetsConfig, fileId: string): Promise<Buffer> {
   const drive = google.drive({ version: "v3", auth: driveAuth(config, ["https://www.googleapis.com/auth/drive.readonly"]) });
