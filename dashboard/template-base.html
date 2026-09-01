@@ -528,6 +528,22 @@
     <span class="gap-badge" id="nav-speeding-badge" style="display:none;"></span>
   </button>
 
+  <div class="sidebar-section-label">Analytics</div>
+  <button class="tab navitem" data-tab="fuelefficiency">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 13l4-5M12 6v1.5"/></svg>
+    Fuel Efficiency
+    <span class="gap-badge" id="nav-fuelefficiency-badge" style="display:none;"></span>
+  </button>
+  <button class="tab navitem" data-tab="flagged">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.6L2.6 17a1.6 1.6 0 0 0 1.4 2.4h16a1.6 1.6 0 0 0 1.4-2.4L13.7 3.6a1.6 1.6 0 0 0-2.8 0z"/><path d="M12 9v4M12 16.2v.1"/></svg>
+    Flagged Vehicles
+    <span class="gap-badge" id="nav-flagged-badge" style="display:none;"></span>
+  </button>
+  <button class="tab navitem" data-tab="geotag">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.3-7-11.5A7 7 0 0 1 19 9.5C19 14.7 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.4"/></svg>
+    Geotag
+  </button>
+
   <div class="sidebar-section-label">Reports</div>
   <button class="tab navitem" data-tab="vehiclereport">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h6M9 16h6M9 8h2"/></svg>
@@ -813,6 +829,55 @@
     <div class="note-box" style="margin-top:12px;">
       <b>How this is calculated:</b> km comes from Cartrack trip distances for the target month (odometer-delta history isn't accumulated far back enough yet — this will switch over automatically once enough daily readings exist). Flags trigger at a 15% deviation, checked two ways: against that vehicle's own trailing average, and against the average for its division. A vehicle can be flagged on one, both, or neither.
     </div>
+  </div>
+
+  <!-- FUEL EFFICIENCY -->
+  <div class="view" data-view="fuelefficiency">
+    <div class="kpi-row" id="fe-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Fuel efficiency</div>
+          <div class="card-note" id="fe-note">Fuel-card litres ÷ Cartrack-metered km, by vehicle</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="fe-table">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:12px;">
+      <b>How this is calculated:</b> litres per 100km, using the same target month and Cartrack trip-distance km as Cost/KM. Flags trigger at a 15% deviation from either that vehicle's own trailing average or its division average — a spike can mean fuel-card misuse, a leak, or heavy idling; a drop can mean under-recorded fuel purchases.
+    </div>
+  </div>
+
+  <!-- FLAGGED VEHICLES -->
+  <div class="view" data-view="flagged">
+    <div class="kpi-row" id="fl-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Flagged vehicles</div>
+          <div class="card-note">Fuel threshold, speeding and harsh-driving exceptions in one view</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="fl-table">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:12px;">
+      <b>How flags are set:</b> <i>Fuel</i> — this month's fuel-card litres exceed the vehicle's monthly limit. <i>Speeding</i> — at least one road-limit or fleet-threshold speeding event, last 30 days. <i>Harsh driving</i> — at least one harsh braking, cornering or acceleration event, last 30 days. Sorted by total flags, most first.
+    </div>
+  </div>
+
+  <!-- GEOTAG -->
+  <div class="view" data-view="geotag">
+    <div id="geo-content"></div>
   </div>
 
   <!-- SPEEDING -->
@@ -1696,11 +1761,13 @@
   var CARTRACK = JSON.parse(document.getElementById('cartrack-data').textContent);
   var LS = CARTRACK.liveStatus || [];
   var TH = CARTRACK.tripHistory || [];
-  var OV = CARTRACK.overview || { topDriversByHarshEvents: [], idleVsDriving: [], dailyActivity: [] };
+  var OV = CARTRACK.overview || { topDriversByHarshEvents: [], harshByVehicle: [], idleVsDriving: [], dailyActivity: [] };
   var CK = CARTRACK.costPerKm || { rows: [] };
   var SP = CARTRACK.speeding || { byVehicle: [], byDriver: [] };
   var COVERAGE = CARTRACK.coverage || {};
   var VM = CARTRACK.vehicleMonthly || { cartrackMonths: [], byReg: {} };
+  var FE = CARTRACK.fuelEfficiency || { rows: [] };
+  var GEO = CARTRACK.geofence || { configured: false, byZone: [], byVehicle: [] };
   var RAW2 = JSON.parse(document.getElementById('fleet-data').textContent);
   var FLEET = RAW2.vehicles || {};
   var ORDER2 = RAW2.order || [];
@@ -2112,6 +2179,150 @@
       : 'No month with both fleet-card and Cartrack data yet';
   }
 
+  /* ---------------- Fuel Efficiency ---------------- */
+  function renderFuelEfficiencyKpis(){
+    var rows = FE.rows || [];
+    var flagged = rows.filter(function(r){ return r.flaggedVsSelf || r.flaggedVsPeer; }).length;
+    var withData = rows.filter(function(r){ return r.lPer100km != null; }).length;
+    var cards = [
+      { label: 'Target month', value: FE.targetMonth || '—' },
+      { label: 'Vehicles reconciled', value: n0(withData) },
+      { label: 'Flagged', value: n0(flagged), critical: flagged > 0 },
+      { label: 'Tolerance', value: (FE.tolerancePct||15) + '%' },
+    ];
+    document.getElementById('fe-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
+    }).join('');
+    var badge = document.getElementById('nav-fuelefficiency-badge');
+    if (flagged > 0){ badge.style.display = 'inline-block'; badge.textContent = flagged; }
+  }
+
+  function renderFuelEfficiencyTable(){
+    var table = document.getElementById('fe-table');
+    var head = ['Vehicle','Division','Litres','Km driven','L / 100km','vs self','vs peers'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var rows = [...(FE.rows||[])].sort(function(a,b){
+      var af = (a.flaggedVsSelf||a.flaggedVsPeer)?1:0, bf = (b.flaggedVsSelf||b.flaggedVsPeer)?1:0;
+      if (af !== bf) return bf - af;
+      return (b.lPer100km||0) - (a.lPer100km||0);
+    });
+    table.querySelector('tbody').innerHTML = rows.map(function(r){
+      return '<tr>'
+        + '<td><span class="plate">'+esc(r.reg)+'</span></td>'
+        + '<td>'+esc(r.division)+'</td>'
+        + '<td class="num tnum">'+n1(r.litres)+' L</td>'
+        + '<td class="num tnum">'+(r.km?n1(r.km)+' km':'—')+'</td>'
+        + '<td class="num tnum">'+(r.lPer100km==null?'—':n1(r.lPer100km))+'</td>'
+        + '<td class="num"><div class="badge-row" style="justify-content:flex-end;">'+costBadge(r.vsSelfPct, r.flaggedVsSelf, 'vs own trailing average ('+n1(r.selfBaselineLPer100km)+' L/100km)')+'</div></td>'
+        + '<td class="num"><div class="badge-row" style="justify-content:flex-end;">'+costBadge(r.vsPeerPct, r.flaggedVsPeer, 'vs '+esc(r.division)+' average ('+n1(r.peerAvgLPer100km)+' L/100km)')+'</div></td>'
+        + '</tr>';
+    }).join('');
+    document.getElementById('fe-note').textContent = FE.targetMonth
+      ? 'Fuel-card litres ÷ Cartrack-metered km, ' + FE.targetMonth
+      : 'No month with both fleet-card and Cartrack data yet';
+  }
+
+  /* ---------------- Flagged Vehicles ---------------- */
+  function flVehicleList(){
+    var regs = ORDER2.length ? ORDER2 : Object.keys(FLEET);
+    return regs.filter(function(reg){ return FLEET[reg] && FLEET[reg].tracked === 'Yes'; });
+  }
+
+  function renderFlaggedVehicles(){
+    var spByReg = {}; (SP.byVehicle||[]).forEach(function(v){ spByReg[v.reg] = v; });
+    var harshByReg = {}; (OV.harshByVehicle||[]).forEach(function(v){ harshByReg[v.reg] = v; });
+    var month = FE.targetMonth || MONTHS2[MONTHS2.length-1];
+
+    var rows = flVehicleList().map(function(reg){
+      var meta = FLEET[reg] || {};
+      var litres = month ? FUEL2.filter(function(f){ return f.r===reg && f.m===month; }).reduce(function(s,t){ return s+(t.l||0); }, 0) : 0;
+      var limit = meta.limit || 0;
+      var fuelOver = limit > 0 && litres > limit;
+
+      var cov = COVERAGE[reg];
+      var cartrackReg = cov && cov.covered ? cov.cartrackReg : null;
+      var spEntry = cartrackReg ? spByReg[cartrackReg] : null;
+      var speedingEvents = spEntry ? (spEntry.roadEvents + spEntry.thresholdEvents) : 0;
+
+      var harshEntry = cartrackReg ? harshByReg[cartrackReg] : null;
+      var harshTotal = harshEntry ? harshEntry.total : 0;
+
+      var flagCount = (fuelOver?1:0) + (speedingEvents>0?1:0) + (harshTotal>0?1:0);
+      return { reg: reg, division: meta.division||'Unassigned', driver: meta.driver||'—', litres: litres, limit: limit, fuelOver: fuelOver, speedingEvents: speedingEvents, harshTotal: harshTotal, flagCount: flagCount };
+    }).sort(function(a,b){ return b.flagCount - a.flagCount; });
+
+    var fuelOverCount = rows.filter(function(r){ return r.fuelOver; }).length;
+    var speedingCount = rows.filter(function(r){ return r.speedingEvents>0; }).length;
+    var harshCount = rows.filter(function(r){ return r.harshTotal>0; }).length;
+    var cleanCount = rows.filter(function(r){ return r.flagCount===0; }).length;
+
+    var cards = [
+      { label: 'Fuel over limit', value: n0(fuelOverCount), critical: fuelOverCount>0 },
+      { label: 'Speeding', value: n0(speedingCount), critical: speedingCount>0 },
+      { label: 'Harsh driving', value: n0(harshCount), critical: harshCount>0 },
+      { label: 'Clean', value: n0(cleanCount) },
+    ];
+    document.getElementById('fl-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
+    }).join('');
+    var badge = document.getElementById('nav-flagged-badge');
+    var totalFlagged = rows.length - cleanCount;
+    if (totalFlagged > 0){ badge.style.display = 'inline-block'; badge.textContent = totalFlagged; }
+
+    var table = document.getElementById('fl-table');
+    var head = ['Vehicle','Division','Driver','Fuel','Speeding','Harsh driving','Flags'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    table.querySelector('tbody').innerHTML = rows.map(function(r){
+      var fuelPill = r.fuelOver ? '<span class="pill pill-critical">'+n0(r.litres)+' / '+n0(r.limit)+' L</span>' : '<span class="pill pill-good">OK</span>';
+      var speedPill = r.speedingEvents>0 ? '<span class="pill pill-warning">'+n0(r.speedingEvents)+' events</span>' : '<span class="pill pill-muted">None</span>';
+      var harshPill = r.harshTotal>0 ? '<span class="pill pill-warning">'+n0(r.harshTotal)+' events</span>' : '<span class="pill pill-muted">None</span>';
+      var flagsPill = r.flagCount>0 ? '<span class="pill pill-critical">'+r.flagCount+' / 3</span>' : '<span class="pill pill-good">Clean</span>';
+      return '<tr>'
+        + '<td><span class="plate">'+esc(r.reg)+'</span></td>'
+        + '<td>'+esc(r.division)+'</td>'
+        + '<td>'+esc(r.driver)+'</td>'
+        + '<td>'+fuelPill+'</td>'
+        + '<td>'+speedPill+'</td>'
+        + '<td>'+harshPill+'</td>'
+        + '<td>'+flagsPill+'</td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  /* ---------------- Geotag ---------------- */
+  function renderGeotag(){
+    var box = document.getElementById('geo-content');
+    if (!GEO.configured){
+      box.innerHTML = '<div class="card"><div class="vr-empty" style="max-width:480px;margin:0 auto;">'
+        + '<b style="color:var(--ink); display:block; margin-bottom:8px; font-size:15px;">No geofences configured yet</b>'
+        + 'Cartrack has no geofenced job-site zones set up in Fleetweb for this account. Once geofences are created there, this report will automatically start showing how long each vehicle spends inside each zone — no changes needed here.'
+        + '</div></div>';
+      return;
+    }
+    var kpis = [
+      { label: 'Zones with activity', value: n0(GEO.byZone.length) },
+      { label: 'Vehicles with visits', value: n0(GEO.byVehicle.length) },
+      { label: 'Total visits', value: n0(GEO.byZone.reduce(function(s,z){return s+z.visits;},0)) },
+      { label: 'Window', value: (GEO.windowDays||30) + ' days' },
+    ];
+    var zoneRows = GEO.byZone.map(function(z){
+      return '<tr><td>'+esc(z.zone)+'</td><td class="num tnum">'+n0(z.visits)+'</td><td class="num tnum">'+n0(z.vehicleCount)+'</td><td class="num tnum">'+n0(z.minutes)+' min</td></tr>';
+    }).join('');
+    var vehicleRows = GEO.byVehicle.map(function(v){
+      return '<tr><td><span class="plate">'+esc(v.reg)+'</span></td><td class="num tnum">'+n0(v.visits)+'</td><td class="num tnum">'+n0(v.minutes)+' min</td></tr>';
+    }).join('');
+    box.innerHTML =
+        '<div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">' + kpis.map(function(c){
+          return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value">'+esc(c.value)+'</div></div>';
+        }).join('') + '</div>'
+      + '<div class="grid-2">'
+        + '<div class="card"><div class="card-head"><div><div class="card-title">By zone</div><div class="card-note">Total time spent, last '+(GEO.windowDays||30)+' days</div></div></div>'
+          + '<div class="table-scroll"><table><thead><tr><th>Zone</th><th class="num">Visits</th><th class="num">Vehicles</th><th class="num">Time</th></tr></thead><tbody>'+zoneRows+'</tbody></table></div></div>'
+        + '<div class="card"><div class="card-head"><div><div class="card-title">By vehicle</div><div class="card-note">Total time in any zone</div></div></div>'
+          + '<div class="table-scroll"><table><thead><tr><th>Vehicle</th><th class="num">Visits</th><th class="num">Time</th></tr></thead><tbody>'+vehicleRows+'</tbody></table></div></div>'
+      + '</div>';
+  }
+
   /* ---------------- Speeding ---------------- */
   function renderSpeedingKpis(){
     var veh = SP.byVehicle || [];
@@ -2302,6 +2513,9 @@
     costperkm: { eyebrow: 'Cartrack Telemetry', title: 'Cost per Kilometre', subtitle: 'Fleet-card spend measured against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     speeding: { eyebrow: 'Cartrack Telemetry', title: 'Speeding Report', subtitle: 'Road-limit and fleet-threshold speeding events by vehicle and driver — last 30 days.', filters: false },
     vehiclereport: { eyebrow: 'Reports', title: 'Vehicle Monthly Report', subtitle: 'Fuel spend and Cartrack driving behaviour for one vehicle, one month, in a single printable view.', filters: false },
+    fuelefficiency: { eyebrow: 'Analytics', title: 'Fuel Efficiency', subtitle: 'Litres per 100km, fuel-card litres against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
+    flagged: { eyebrow: 'Analytics', title: 'Flagged Vehicles', subtitle: 'Every vehicle currently over its fuel threshold, speeding, or driving harshly, in one exception list.', filters: false },
+    geotag: { eyebrow: 'Analytics', title: 'Geotag', subtitle: 'Time spent inside Cartrack geofenced areas, once job-site zones are set up in Fleetweb.', filters: false },
   };
   var origSubtitle = document.getElementById('section-subtitle').textContent;
   document.querySelectorAll('.navitem').forEach(function(btn){
@@ -2331,6 +2545,10 @@
     renderSpeedingBarChart();
     renderSpeedingVehicleTable();
     renderSpeedingDriverTable();
+    renderFuelEfficiencyKpis();
+    renderFuelEfficiencyTable();
+    renderFlaggedVehicles();
+    renderGeotag();
   }
 
   renderCartrackAll();

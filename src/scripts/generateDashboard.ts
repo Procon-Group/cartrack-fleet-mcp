@@ -24,6 +24,7 @@ const DASHBOARD_DIR = path.resolve(__dirname, "../../dashboard");
 
 const OVERVIEW_WINDOW_DAYS = 30;
 const COST_PER_KM_TOLERANCE = 0.15; // 15% deviation flags a vehicle (distinct from the 5% litres tolerance)
+const FUEL_EFFICIENCY_TOLERANCE = 0.15; // 15% deviation in L/100km flags a vehicle
 
 interface FleetCardVehicle {
   id: string;
@@ -181,6 +182,7 @@ async function main() {
 
   // ---- Cartrack Overview widgets ----
   const harshByDriver = new Map<string, { accel: number; braking: number; cornering: number }>();
+  const harshByVehicle = new Map<string, { accel: number; braking: number; cornering: number }>();
   const idleVsDriving = new Map<string, { idleSec: number; drivingSec: number; tripCount: number }>();
   const dailyActivity = new Map<string, Set<string>>(); // reg -> set of "YYYY-MM-DD" with a trip
   const speedingByVehicle = new Map<string, { roadEvents: number; roadSec: number; thresholdEvents: number; thresholdSec: number; maxSpeed: number; tripsOverLimit: number }>();
@@ -194,6 +196,13 @@ async function main() {
       h.braking += t.harsh_braking_events ?? 0;
       h.cornering += t.harsh_cornering_events ?? 0;
       harshByDriver.set(driver, h);
+    }
+    {
+      const hv = harshByVehicle.get(t.registration) ?? { accel: 0, braking: 0, cornering: 0 };
+      hv.accel += t.harsh_acceleration_events ?? 0;
+      hv.braking += t.harsh_braking_events ?? 0;
+      hv.cornering += t.harsh_cornering_events ?? 0;
+      harshByVehicle.set(t.registration, hv);
     }
     const iv = idleVsDriving.get(t.registration) ?? { idleSec: 0, drivingSec: 0, tripCount: 0 };
     iv.idleSec += t.idle_time_seconds ?? 0;
@@ -229,6 +238,57 @@ async function main() {
     .map(([driver, h]) => ({ driver, ...h, total: h.accel + h.braking + h.cornering }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
+
+  const harshByVehicleList = [...harshByVehicle.entries()]
+    .map(([reg, h]) => ({ reg, ...h, total: h.accel + h.braking + h.cornering }))
+    .sort((a, b) => b.total - a.total);
+
+  // ---- Geofence dwell time ----
+  // Cartrack's account has no geofences configured yet (confirmed live), so start_geofence_name/
+  // end_geofence_name will be empty on every trip until Procon sets up job-site zones in Fleetweb.
+  // This still computes correctly and will light up automatically once they exist — no code change
+  // needed later. Dwell time = the gap between a trip ending at a named geofence and the same
+  // vehicle's next trip starting at that same geofence (i.e. time spent stationary there).
+  const tripsByVehicle = new Map<string, Trip[]>();
+  for (const t of allTrips) {
+    if (!tripsByVehicle.has(t.registration)) tripsByVehicle.set(t.registration, []);
+    tripsByVehicle.get(t.registration)!.push(t);
+  }
+  const geofenceZoneStats = new Map<string, { minutes: number; visits: number; vehicles: Set<string> }>();
+  const geofenceVehicleStats = new Map<string, { minutes: number; visits: number }>();
+  let geofenceConfigured = false;
+  for (const [reg, trips] of tripsByVehicle) {
+    const sorted = [...trips].sort((a, b) => (a.start_timestamp < b.start_timestamp ? -1 : 1));
+    for (const t of sorted) {
+      if (t.start_geofence_name || t.end_geofence_name) geofenceConfigured = true;
+    }
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const endGeo = sorted[i].end_geofence_name;
+      const startGeo = sorted[i + 1].start_geofence_name;
+      if (!endGeo || !startGeo || endGeo !== startGeo) continue;
+      const arrivedMs = new Date(sorted[i].end_timestamp.replace(" ", "T") + "Z").getTime();
+      const departedMs = new Date(sorted[i + 1].start_timestamp.replace(" ", "T") + "Z").getTime();
+      const minutes = (departedMs - arrivedMs) / 60000;
+      if (!(minutes > 0)) continue;
+
+      const zs = geofenceZoneStats.get(endGeo) ?? { minutes: 0, visits: 0, vehicles: new Set<string>() };
+      zs.minutes += minutes;
+      zs.visits += 1;
+      zs.vehicles.add(reg);
+      geofenceZoneStats.set(endGeo, zs);
+
+      const vs = geofenceVehicleStats.get(reg) ?? { minutes: 0, visits: 0 };
+      vs.minutes += minutes;
+      vs.visits += 1;
+      geofenceVehicleStats.set(reg, vs);
+    }
+  }
+  const geofenceByZone = [...geofenceZoneStats.entries()]
+    .map(([zone, s]) => ({ zone, minutes: Number(s.minutes.toFixed(1)), visits: s.visits, vehicleCount: s.vehicles.size }))
+    .sort((a, b) => b.minutes - a.minutes);
+  const geofenceByVehicle = [...geofenceVehicleStats.entries()]
+    .map(([reg, s]) => ({ reg, minutes: Number(s.minutes.toFixed(1)), visits: s.visits }))
+    .sort((a, b) => b.minutes - a.minutes);
 
   const idleVsDrivingList = [...idleVsDriving.entries()]
     .map(([reg, v]) => ({ reg, idleMin: Math.round(v.idleSec / 60), drivingMin: Math.round(v.drivingSec / 60), idlePerTripMin: v.tripCount > 0 ? Math.round(v.idleSec / 60 / v.tripCount) : 0 }))
@@ -269,6 +329,7 @@ async function main() {
   const targetMonth = [...monthTotals.entries()].filter(([, cost]) => cost > 0).sort((a, b) => (a[0] < b[0] ? 1 : -1))[0]?.[0];
 
   const costPerKm: any[] = [];
+  const fuelEfficiency: any[] = [];
   let vehicleMonthly: { cartrackMonths: string[]; byReg: Record<string, Record<string, MonthStats>> } = { cartrackMonths: [], byReg: {} };
   if (targetMonth) {
     console.log(`Cost/km target month: ${targetMonth}. Fetching Cartrack trip-distance km for target + 2 prior months...`);
@@ -362,6 +423,56 @@ async function main() {
       });
     }
 
+    // ---- Fuel Efficiency (L/100km) Reconciliation ----
+    // Same shape as Cost/KM above but litres-based — catches over/under fuel-card purchases
+    // relative to actual Cartrack-metered distance, independent of Rand price fluctuations.
+    const targetEffEntries: { reg: string; division: string; litres: number; km: number; lPer100km: number | null }[] = [];
+    for (const reg in coverage) {
+      if (!coverage[reg].covered) continue;
+      const litres = cardByRegMonth.get(reg)?.get(targetMonth)?.litres ?? 0;
+      const km = cartrackStatsByRegMonth.get(reg)?.get(targetMonth)?.km ?? 0;
+      targetEffEntries.push({ reg, division: divisionOf(reg), litres, km, lPer100km: km > 0 ? (litres / km) * 100 : null });
+    }
+
+    const byDivisionEff = new Map<string, number[]>();
+    for (const e of targetEffEntries) {
+      if (e.lPer100km === null) continue;
+      if (!byDivisionEff.has(e.division)) byDivisionEff.set(e.division, []);
+      byDivisionEff.get(e.division)!.push(e.lPer100km);
+    }
+    const peerAvgEffByDivision = new Map<string, number>();
+    for (const [div, values] of byDivisionEff) peerAvgEffByDivision.set(div, values.reduce((a, b) => a + b, 0) / values.length);
+
+    for (const e of targetEffEntries) {
+      const priorMonths = [prevMonthLabel(targetMonth, 1), prevMonthLabel(targetMonth, 2)];
+      const priorEff: number[] = [];
+      for (const pm of priorMonths) {
+        const litres = cardByRegMonth.get(e.reg)?.get(pm)?.litres ?? 0;
+        const km = cartrackStatsByRegMonth.get(e.reg)?.get(pm)?.km ?? 0;
+        if (litres > 0 && km > 0) priorEff.push((litres / km) * 100);
+      }
+      const selfBaseline = priorEff.length > 0 ? priorEff.reduce((a, b) => a + b, 0) / priorEff.length : null;
+      const peerAvg = peerAvgEffByDivision.get(e.division) ?? null;
+
+      const vsSelfPct = e.lPer100km !== null && selfBaseline !== null ? (e.lPer100km - selfBaseline) / selfBaseline : null;
+      const vsPeerPct = e.lPer100km !== null && peerAvg !== null ? (e.lPer100km - peerAvg) / peerAvg : null;
+
+      fuelEfficiency.push({
+        reg: e.reg,
+        division: e.division,
+        month: targetMonth,
+        litres: Number(e.litres.toFixed(1)),
+        km: e.km,
+        lPer100km: e.lPer100km !== null ? Number(e.lPer100km.toFixed(1)) : null,
+        selfBaselineLPer100km: selfBaseline !== null ? Number(selfBaseline.toFixed(1)) : null,
+        peerAvgLPer100km: peerAvg !== null ? Number(peerAvg.toFixed(1)) : null,
+        vsSelfPct: vsSelfPct !== null ? Number((vsSelfPct * 100).toFixed(1)) : null,
+        vsPeerPct: vsPeerPct !== null ? Number((vsPeerPct * 100).toFixed(1)) : null,
+        flaggedVsSelf: vsSelfPct !== null && Math.abs(vsSelfPct) > FUEL_EFFICIENCY_TOLERANCE,
+        flaggedVsPeer: vsPeerPct !== null && Math.abs(vsPeerPct) > FUEL_EFFICIENCY_TOLERANCE,
+      });
+    }
+
     vehicleMonthly = {
       cartrackMonths: monthsToFetch,
       byReg: Object.fromEntries([...cartrackStatsByRegMonth.entries()].map(([reg, byMonth]) => [reg, Object.fromEntries(byMonth)])),
@@ -379,6 +490,7 @@ async function main() {
     tripHistory,
     overview: {
       topDriversByHarshEvents,
+      harshByVehicle: harshByVehicleList,
       idleVsDriving: idleVsDrivingList,
       dailyActivity: dailyActivityGrid,
     },
@@ -392,11 +504,22 @@ async function main() {
       tolerancePct: COST_PER_KM_TOLERANCE * 100,
       rows: costPerKm,
     },
+    fuelEfficiency: {
+      targetMonth: targetMonth ?? null,
+      tolerancePct: FUEL_EFFICIENCY_TOLERANCE * 100,
+      rows: fuelEfficiency,
+    },
+    geofence: {
+      configured: geofenceConfigured,
+      windowDays: OVERVIEW_WINDOW_DAYS,
+      byZone: geofenceByZone,
+      byVehicle: geofenceByVehicle,
+    },
   };
 
   writeFileSync(outputPath, JSON.stringify(cartrackData));
   console.log(`\nWrote ${outputPath} (${(JSON.stringify(cartrackData).length / 1024).toFixed(0)} KB)`);
-  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}`);
+  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}, fuel-efficiency rows: ${fuelEfficiency.length}, geofence zones: ${geofenceByZone.length}`);
 }
 
 main().catch((err) => {
