@@ -57,6 +57,20 @@ interface FuelTxn {
   n: string; // note
 }
 
+interface MonthStats {
+  km: number;
+  tripCount: number;
+  idleMin: number;
+  harshBraking: number;
+  harshCornering: number;
+  harshAccel: number;
+  roadSpeedingEvents: number;
+  roadSpeedingMin: number;
+  thresholdSpeedingEvents: number;
+  thresholdSpeedingMin: number;
+  maxSpeed: number;
+}
+
 interface ExistingFleetData {
   vehicles: Record<string, FleetCardVehicle>;
   order: string[];
@@ -255,6 +269,7 @@ async function main() {
   const targetMonth = [...monthTotals.entries()].filter(([, cost]) => cost > 0).sort((a, b) => (a[0] < b[0] ? 1 : -1))[0]?.[0];
 
   const costPerKm: any[] = [];
+  let vehicleMonthly: { cartrackMonths: string[]; byReg: Record<string, Record<string, MonthStats>> } = { cartrackMonths: [], byReg: {} };
   if (targetMonth) {
     console.log(`Cost/km target month: ${targetMonth}. Fetching Cartrack trip-distance km for target + 2 prior months...`);
     const monthsToFetch = [targetMonth, prevMonthLabel(targetMonth, 1), prevMonthLabel(targetMonth, 2)];
@@ -270,19 +285,31 @@ async function main() {
       byMonth.set(f.m, cur);
     }
 
-    // cartrack registration -> month -> km (from trip distances)
-    const cartrackKmByRegMonth = new Map<string, Map<string, number>>();
+    // cartrack registration -> month -> full trip stats (km + driving behaviour), reused below for
+    // both Cost/KM and the per-vehicle monthly report — one fetch serves both.
+    const cartrackStatsByRegMonth = new Map<string, Map<string, MonthStats>>();
     for (const reg in coverage) {
       if (!coverage[reg].covered) continue;
       const cartrackReg = coverage[reg].cartrackReg!;
-      const byMonth = new Map<string, number>();
+      const byMonth = new Map<string, MonthStats>();
       for (const month of monthsToFetch) {
         const { start, end } = monthWindow(month);
         const trips = await cartrack.getTrips({ startTimestamp: start, endTimestamp: end, registration: cartrackReg });
-        const km = trips.reduce((sum, t) => sum + (t.trip_distance ?? 0), 0) / 1000;
-        byMonth.set(month, Number(km.toFixed(1)));
+        byMonth.set(month, {
+          km: Number((trips.reduce((sum, t) => sum + (t.trip_distance ?? 0), 0) / 1000).toFixed(1)),
+          tripCount: trips.length,
+          idleMin: Number((trips.reduce((sum, t) => sum + (t.idle_time_seconds ?? 0), 0) / 60).toFixed(1)),
+          harshBraking: trips.reduce((sum, t) => sum + (t.harsh_braking_events ?? 0), 0),
+          harshCornering: trips.reduce((sum, t) => sum + (t.harsh_cornering_events ?? 0), 0),
+          harshAccel: trips.reduce((sum, t) => sum + (t.harsh_acceleration_events ?? 0), 0),
+          roadSpeedingEvents: trips.reduce((sum, t) => sum + (t.road_speeding_events ?? 0), 0),
+          roadSpeedingMin: Number((trips.reduce((sum, t) => sum + (t.road_speeding_duration_seconds ?? 0), 0) / 60).toFixed(1)),
+          thresholdSpeedingEvents: trips.reduce((sum, t) => sum + (t.thresholds_speeding_events ?? 0), 0),
+          thresholdSpeedingMin: Number((trips.reduce((sum, t) => sum + (t.thresholds_speeding_duration_seconds ?? 0), 0) / 60).toFixed(1)),
+          maxSpeed: trips.reduce((max, t) => Math.max(max, t.max_speed ?? 0), 0),
+        });
       }
-      cartrackKmByRegMonth.set(reg, byMonth);
+      cartrackStatsByRegMonth.set(reg, byMonth);
     }
 
     const divisionOf = (reg: string) => existing.vehicles[reg]?.division ?? "Unassigned";
@@ -292,7 +319,7 @@ async function main() {
     for (const reg in coverage) {
       if (!coverage[reg].covered) continue;
       const rand = cardByRegMonth.get(reg)?.get(targetMonth)?.rand ?? 0;
-      const km = cartrackKmByRegMonth.get(reg)?.get(targetMonth) ?? 0;
+      const km = cartrackStatsByRegMonth.get(reg)?.get(targetMonth)?.km ?? 0;
       targetEntries.push({ reg, division: divisionOf(reg), rand, km, randPerKm: km > 0 ? rand / km : null });
     }
 
@@ -310,7 +337,7 @@ async function main() {
       const priorRandPerKm: number[] = [];
       for (const pm of priorMonths) {
         const rand = cardByRegMonth.get(e.reg)?.get(pm)?.rand ?? 0;
-        const km = cartrackKmByRegMonth.get(e.reg)?.get(pm) ?? 0;
+        const km = cartrackStatsByRegMonth.get(e.reg)?.get(pm)?.km ?? 0;
         if (rand > 0 && km > 0) priorRandPerKm.push(rand / km);
       }
       const selfBaseline = priorRandPerKm.length > 0 ? priorRandPerKm.reduce((a, b) => a + b, 0) / priorRandPerKm.length : null;
@@ -334,6 +361,11 @@ async function main() {
         flaggedVsPeer: vsPeerPct !== null && Math.abs(vsPeerPct) > COST_PER_KM_TOLERANCE,
       });
     }
+
+    vehicleMonthly = {
+      cartrackMonths: monthsToFetch,
+      byReg: Object.fromEntries([...cartrackStatsByRegMonth.entries()].map(([reg, byMonth]) => [reg, Object.fromEntries(byMonth)])),
+    };
   } else {
     console.log("No target month with real fleet-card fuel cost found — Cost/km will show an empty state.");
   }
@@ -354,6 +386,7 @@ async function main() {
       byVehicle: speedingByVehicleList,
       byDriver: speedingByDriverList,
     },
+    vehicleMonthly,
     costPerKm: {
       targetMonth: targetMonth ?? null,
       tolerancePct: COST_PER_KM_TOLERANCE * 100,

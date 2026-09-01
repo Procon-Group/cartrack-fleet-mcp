@@ -452,6 +452,35 @@
     display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
   }
   svg text { fill: var(--ink-muted); }
+
+  /* ---------- Vehicle report ---------- */
+  .btn-accent {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: white;
+    border-radius: 8px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-accent:hover { background: var(--accent-2); }
+  .vr-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap;
+  }
+  .vr-head h2 { font-size: 19px; font-weight: 700; margin: 0 0 4px; }
+  .vr-head .vr-meta { font-size: 12.5px; color: var(--ink-2); }
+  .vr-head .vr-meta span + span::before { content: '·'; margin: 0 7px; color: var(--ink-muted); }
+  .vr-empty { padding: 40px 20px; text-align: center; color: var(--ink-muted); font-size: 13.5px; }
+
+  @media print {
+    body * { visibility: hidden; }
+    #vr-report, #vr-report * { visibility: visible; }
+    #vr-report { position: absolute; top: 0; left: 0; width: 100%; }
+    .sidebar, .topbar, #vr-filters, footer.foot { display: none !important; }
+  }
 </style>
 
 <div class="shell">
@@ -497,6 +526,12 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><path d="M12 12l4-3"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
     Speeding
     <span class="gap-badge" id="nav-speeding-badge" style="display:none;"></span>
+  </button>
+
+  <div class="sidebar-section-label">Reports</div>
+  <button class="tab navitem" data-tab="vehiclereport">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h6M9 16h6M9 8h2"/></svg>
+    Vehicle Report
   </button>
 </nav>
 
@@ -827,6 +862,19 @@
     <div class="note-box" style="margin-top:12px;">
       <b>Two speeding measures:</b> <i>road-limit</i> events are speed over the actual road's posted limit; <i>fleet-threshold</i> events are speed over a flat threshold configured in Fleetweb (if configured — may read zero if that feature isn't set up on this account). Both are shown since they catch different things.
     </div>
+  </div>
+
+  <!-- VEHICLE REPORT -->
+  <div class="view" data-view="vehiclereport">
+    <div class="filters" id="vr-filters">
+      <span class="filter-label">Vehicle</span>
+      <select class="control" id="vr-vehicle-select"></select>
+      <span class="filter-label" style="margin-left:6px;">Month</span>
+      <select class="control" id="vr-month-select"></select>
+      <div class="spacer"></div>
+      <button class="btn-accent" id="vr-print-btn" type="button">Print report</button>
+    </div>
+    <div id="vr-report"></div>
   </div>
 
   <footer class="foot">
@@ -1652,7 +1700,12 @@
   var CK = CARTRACK.costPerKm || { rows: [] };
   var SP = CARTRACK.speeding || { byVehicle: [], byDriver: [] };
   var COVERAGE = CARTRACK.coverage || {};
-  var FLEET = JSON.parse(document.getElementById('fleet-data').textContent).vehicles || {};
+  var VM = CARTRACK.vehicleMonthly || { cartrackMonths: [], byReg: {} };
+  var RAW2 = JSON.parse(document.getElementById('fleet-data').textContent);
+  var FLEET = RAW2.vehicles || {};
+  var ORDER2 = RAW2.order || [];
+  var MONTHS2 = RAW2.months || [];
+  var FUEL2 = RAW2.fuel || [];
   var svgNS = 'http://www.w3.org/2000/svg';
 
   function n0(x){ return Math.round(x||0).toLocaleString(); }
@@ -2118,6 +2171,126 @@
     }).join('') : '<tr><td colspan="4" style="text-align:center; color:var(--ink-muted); padding:24px;">No speeding events in the last 30 days</td></tr>';
   }
 
+  /* ---------------- Vehicle monthly report ---------------- */
+  function vrMonthLabel(mk){
+    if (!mk) return '';
+    var p = mk.split('-'); var names = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return names[parseInt(p[1],10)] + ' ' + p[0];
+  }
+
+  function vrVehicleList(){
+    var regs = ORDER2.length ? ORDER2 : Object.keys(FLEET);
+    return regs.filter(function(reg){ return FLEET[reg] && FLEET[reg].tracked === 'Yes'; });
+  }
+
+  function vrStatBlock(title, items){
+    return '<div class="drawer-chart"><div class="drawer-chart-title">'+esc(title)+'</div><div class="drawer-stats">'
+      + items.map(function(it){ return '<div><span>'+esc(it[0])+'</span><b>'+esc(it[1])+'</b></div>'; }).join('')
+      + '</div></div>';
+  }
+
+  function populateVehicleReportSelectors(){
+    var vSel = document.getElementById('vr-vehicle-select');
+    var mSel = document.getElementById('vr-month-select');
+    var regs = vrVehicleList();
+    vSel.innerHTML = regs.map(function(reg){
+      var v = FLEET[reg] || {};
+      return '<option value="'+esc(reg)+'">'+esc(reg)+' — '+esc(v.vehicle||v.driver||'')+'</option>';
+    }).join('');
+    mSel.innerHTML = MONTHS2.map(function(mk){
+      return '<option value="'+esc(mk)+'">'+esc(vrMonthLabel(mk))+'</option>';
+    }).join('');
+    var defaultMonth = MONTHS2[MONTHS2.length-2] || MONTHS2[MONTHS2.length-1];
+    if (defaultMonth) mSel.value = defaultMonth;
+    if (regs.length) vSel.value = regs[0];
+    vSel.addEventListener('change', renderVehicleReport);
+    mSel.addEventListener('change', renderVehicleReport);
+    var printBtn = document.getElementById('vr-print-btn');
+    if (printBtn) printBtn.addEventListener('click', function(){ window.print(); });
+  }
+
+  function renderVehicleReport(){
+    var box = document.getElementById('vr-report');
+    var vSel = document.getElementById('vr-vehicle-select');
+    var mSel = document.getElementById('vr-month-select');
+    var reg = vSel && vSel.value;
+    var month = mSel && mSel.value;
+    if (!reg || !month){ box.innerHTML = '<div class="vr-empty">No vehicle data available.</div>'; return; }
+
+    var meta = FLEET[reg] || {};
+    var txns = FUEL2.filter(function(f){ return f.r === reg && f.m === month; });
+    var litres = txns.reduce(function(s,t){ return s+(t.l||0); }, 0);
+    var fuelRand = txns.reduce(function(s,t){ return s+(t.c||0); }, 0);
+
+    var cStats = (VM.byReg[reg] && VM.byReg[reg][month]) || null;
+    var cartrackAvailable = VM.cartrackMonths.indexOf(month) !== -1;
+    var randPerKm = (cStats && cStats.km > 0) ? (fuelRand / cStats.km) : null;
+
+    var kpis = [
+      { label: 'Fuel cost', value: money(fuelRand, 2) },
+      { label: 'Litres', value: n1(litres) + ' L' },
+      { label: 'Distance', value: cStats ? n1(cStats.km) + ' km' : '—' },
+      { label: 'Rand / km', value: randPerKm==null ? '—' : money(randPerKm, 2) },
+    ];
+
+    var driving = cStats ? [
+      ['Trips', n0(cStats.tripCount)],
+      ['Idle time', n0(cStats.idleMin) + ' min'],
+      ['Harsh braking', n0(cStats.harshBraking)],
+      ['Harsh cornering', n0(cStats.harshCornering)],
+      ['Harsh acceleration', n0(cStats.harshAccel)],
+    ] : [];
+
+    var speedingItems = cStats ? [
+      ['Road-limit events', n0(cStats.roadSpeedingEvents)],
+      ['Road-limit time', n1(cStats.roadSpeedingMin) + ' min'],
+      ['Fleet-threshold events', n0(cStats.thresholdSpeedingEvents)],
+      ['Fleet-threshold time', n1(cStats.thresholdSpeedingMin) + ' min'],
+      ['Max speed reached', cStats.maxSpeed ? n0(cStats.maxSpeed)+' km/h' : '—'],
+    ] : [];
+
+    var fuelRowsHtml = txns.length ? txns.slice().sort(function(a,b){ return a.d < b.d ? -1 : 1; }).map(function(t){
+      return '<tr>'
+        + '<td class="tnum">'+esc(t.d)+'</td>'
+        + '<td class="num tnum">'+n1(t.l)+' L</td>'
+        + '<td class="num tnum">'+money(t.c,2)+'</td>'
+        + '<td class="num tnum">'+(t.p?money(t.p,2):'—')+'</td>'
+        + '<td class="num tnum">'+(t.o?n0(t.o)+' km':'—')+'</td>'
+        + '<td>'+esc(t.dr||'—')+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="6" style="text-align:center; color:var(--ink-muted); padding:18px;">No fuel-card transactions this month</td></tr>';
+
+    var cartrackNote = cartrackAvailable ? '' :
+      '<div class="note-box" style="margin-top:14px;">Cartrack driving-behaviour data is only available for the most recent 3 months ('
+      + VM.cartrackMonths.map(vrMonthLabel).join(', ') + '). Fuel-card figures above cover every month on record.</div>';
+
+    box.innerHTML =
+        '<div class="card">'
+          + '<div class="vr-head"><div>'
+            + '<h2>'+esc(reg)+' — '+esc(meta.vehicle||'')+'</h2>'
+            + '<div class="vr-meta"><span>'+esc(meta.division||'Unassigned')+'</span><span>'+esc(meta.driver||'No driver on record')+'</span><span>'+esc(vrMonthLabel(month))+'</span></div>'
+          + '</div></div>'
+        + '</div>'
+      + '<div class="kpi-row" style="margin-top:14px;">' + kpis.map(function(c){
+          return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value">'+esc(c.value)+'</div></div>';
+        }).join('') + '</div>'
+      + (cStats ? (
+          '<div class="card" style="margin-top:14px;">'
+            + '<div class="card-head"><div><div class="card-title">Driving behaviour &amp; speeding</div><div class="card-note">'+esc(vrMonthLabel(month))+' — Cartrack telemetry</div></div></div>'
+            + '<div class="drawer-inner" style="padding:4px 0 0;">' + vrStatBlock('Driving behaviour', driving) + vrStatBlock('Speed', speedingItems) + '</div>'
+          + '</div>'
+        ) : '')
+      + cartrackNote
+      + '<div class="card" style="margin-top:14px;">'
+        + '<div class="card-head"><div><div class="card-title">Fuel-card transactions</div><div class="card-note">'+esc(vrMonthLabel(month))+'</div></div></div>'
+        + '<div class="table-scroll"><table><thead><tr><th>Date</th><th class="num">Litres</th><th class="num">Cost</th><th class="num">Price/L</th><th class="num">Odometer</th><th>Driver</th></tr></thead><tbody>'
+        + fuelRowsHtml + '</tbody></table></div>'
+      + '</div>';
+  }
+
+  populateVehicleReportSelectors();
+  renderVehicleReport();
+
   /* ---------------- Section header + filter visibility per tab ---------------- */
   var SECTION_META = {
     overview: { eyebrow: 'Procon Electrical &amp; Steel', title: 'Fleet Fuel &amp; Expense Dashboard', subtitle: null, filters: true },
@@ -2128,6 +2301,7 @@
     cartrackoverview: { eyebrow: 'Cartrack Telemetry', title: 'Cartrack Overview', subtitle: 'Fleet-wide driving behaviour, idle time and daily activity — last 30 days.', filters: false },
     costperkm: { eyebrow: 'Cartrack Telemetry', title: 'Cost per Kilometre', subtitle: 'Fleet-card spend measured against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     speeding: { eyebrow: 'Cartrack Telemetry', title: 'Speeding Report', subtitle: 'Road-limit and fleet-threshold speeding events by vehicle and driver — last 30 days.', filters: false },
+    vehiclereport: { eyebrow: 'Reports', title: 'Vehicle Monthly Report', subtitle: 'Fuel spend and Cartrack driving behaviour for one vehicle, one month, in a single printable view.', filters: false },
   };
   var origSubtitle = document.getElementById('section-subtitle').textContent;
   document.querySelectorAll('.navitem').forEach(function(btn){
