@@ -35,7 +35,7 @@ async function main() {
   console.log(`Fleet size: ${vehicles.length} vehicles`);
 
   const [statuses, trips, fuel] = await Promise.all([
-    cartrack.getVehicleStatus(),
+    cartrack.getVehicleStatus({ odometerInKm: true }),
     cartrack.getTrips({ startTimestamp: start, endTimestamp: end }),
     cartrack.getFuelData({ startTimestamp: start, endTimestamp: end, registrations }),
   ]);
@@ -62,7 +62,7 @@ async function writeVehicleStatus(sheet: SheetsWriter, date: string, statuses: V
     s.idling ?? "",
     s.speed ?? "",
     s.odometer ?? "",
-    s.fuel?.percentage_left ?? "",
+    s.fuel?.precentage_left ?? s.fuel?.percentage_left ?? "",
     s.fuel?.level ?? "",
     s.location?.latitude ?? "",
     s.location?.longitude ?? "",

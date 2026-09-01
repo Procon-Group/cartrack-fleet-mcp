@@ -78,7 +78,11 @@ export interface VehicleStatus {
   fuel?: {
     updated?: string;
     level?: number;
+    // Cartrack's live API actually returns this misspelled as "precentage_left" (confirmed
+    // against a real response on 2026-09-01) — the OpenAPI spec's "percentage_left" doesn't
+    // match. Both are read defensively in case Cartrack fixes the typo later.
     percentage_left?: number;
+    precentage_left?: number;
     total_consumed?: number;
   };
   electric?: {
