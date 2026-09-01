@@ -5,9 +5,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /*
-    Dark-first design — this dashboard's whole identity is the dark control-room look, so
-    the bare :root carries the dark palette (not light) and the media query below handles
-    the un-stamped "system prefers light" case, per the dark-first swap pattern.
+    Committed dark theme — this dashboard's whole identity is the dark control-room look, so
+    it renders dark unconditionally rather than following system/browser preference. Accent
+    is Procon's own brand blue (from the logo's "PR" lettering); Electrical's division color
+    is a deliberately deeper, more muted blue so the two don't read as the same color even
+    though both are "blue" — division color is functional (which fleet), accent is chrome
+    (active nav, primary actions), and they need to stay visually distinct from each other.
   */
   :root {
     color-scheme: dark;
@@ -15,17 +18,17 @@
     --surface:     #131319;
     --surface-2:   #1b1b24;
     --ink:         #f2f1f7;
-    --ink-2:       #9694a3;
-    --ink-muted:   #6b6976;
-    --grid:        #201f2b;
-    --baseline:    #2e2c3b;
+    --ink-2:       #97989f;
+    --ink-muted:   #6c6d74;
+    --grid:        #1f2029;
+    --baseline:    #2c2d38;
     --border:      rgba(255,255,255,0.08);
     --border-strong: rgba(255,255,255,0.15);
 
-    --accent:      #8b6cf6;
-    --accent-2:    #b18bff;
-    --accent-wash: #8b6cf626;
-    --slot-1:      #5b8def; /* Electrical */
+    --accent:      #2AA9E8; /* Procon brand blue */
+    --accent-2:    #0F6FB5;
+    --accent-wash: #2AA9E826;
+    --slot-1:      #3D6FA8; /* Electrical — deliberately deeper/muted than the accent blue */
     --slot-2:      #e0954c; /* Steel */
     --slot-3:      #34b892; /* Unassigned */
 
@@ -35,105 +38,10 @@
     --warning-wash:#f0b42926;
     --critical:    #f2555a;
     --critical-wash:#f2555a26;
-    --muted-wash:  rgba(139,137,156,0.14);
+    --muted-wash:  rgba(151,152,159,0.14);
 
     --radius: 16px;
     --radius-sm: 10px;
-    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 20px 44px -20px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.02);
-    --shadow-glow: 0 1px 2px rgba(0,0,0,0.4), 0 20px 44px -20px rgba(0,0,0,0.65), 0 0 32px -8px var(--accent-wash);
-  }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      color-scheme: light;
-      --page:        #f7f6fb;
-      --surface:     #ffffff;
-      --surface-2:   #f1eff8;
-      --ink:         #16151d;
-      --ink-2:       #5b596a;
-      --ink-muted:   #8b899c;
-      --grid:        #ece9f5;
-      --baseline:    #d7d4e3;
-      --border:      rgba(20,20,30,0.08);
-      --border-strong: rgba(20,20,30,0.15);
-
-      --accent:      #6d4fd1;
-      --accent-2:    #5638b8;
-      --accent-wash: #6d4fd11a;
-      --slot-1:      #3a72d1;
-      --slot-2:      #c46a2e;
-      --slot-3:      #1f9c78;
-
-      --good:        #1f9c56;
-      --good-wash:   #1f9c561a;
-      --warning:     #b9790f;
-      --warning-wash:#b9790f1a;
-      --critical:    #d6383f;
-      --critical-wash:#d6383f1a;
-      --muted-wash:  rgba(91,89,106,0.10);
-
-      --shadow: 0 1px 2px rgba(20,20,30,0.04), 0 16px 32px -16px rgba(20,20,30,0.12), 0 0 0 1px rgba(20,20,30,0.02);
-      --shadow-glow: var(--shadow);
-    }
-  }
-  :root[data-theme="light"] {
-    color-scheme: light;
-    --page:        #f7f6fb;
-    --surface:     #ffffff;
-    --surface-2:   #f1eff8;
-    --ink:         #16151d;
-    --ink-2:       #5b596a;
-    --ink-muted:   #8b899c;
-    --grid:        #ece9f5;
-    --baseline:    #d7d4e3;
-    --border:      rgba(20,20,30,0.08);
-    --border-strong: rgba(20,20,30,0.15);
-
-    --accent:      #6d4fd1;
-    --accent-2:    #5638b8;
-    --accent-wash: #6d4fd11a;
-    --slot-1:      #3a72d1;
-    --slot-2:      #c46a2e;
-    --slot-3:      #1f9c78;
-
-    --good:        #1f9c56;
-    --good-wash:   #1f9c561a;
-    --warning:     #b9790f;
-    --warning-wash:#b9790f1a;
-    --critical:    #d6383f;
-    --critical-wash:#d6383f1a;
-    --muted-wash:  rgba(91,89,106,0.10);
-
-    --shadow: 0 1px 2px rgba(20,20,30,0.04), 0 16px 32px -16px rgba(20,20,30,0.12), 0 0 0 1px rgba(20,20,30,0.02);
-    --shadow-glow: var(--shadow);
-  }
-  :root[data-theme="dark"] {
-    color-scheme: dark;
-    --page:        #08080d;
-    --surface:     #131319;
-    --surface-2:   #1b1b24;
-    --ink:         #f2f1f7;
-    --ink-2:       #9694a3;
-    --ink-muted:   #6b6976;
-    --grid:        #201f2b;
-    --baseline:    #2e2c3b;
-    --border:      rgba(255,255,255,0.08);
-    --border-strong: rgba(255,255,255,0.15);
-
-    --accent:      #8b6cf6;
-    --accent-2:    #b18bff;
-    --accent-wash: #8b6cf626;
-    --slot-1:      #5b8def;
-    --slot-2:      #e0954c;
-    --slot-3:      #34b892;
-
-    --good:        #3ecf6e;
-    --good-wash:   #3ecf6e26;
-    --warning:     #f0b429;
-    --warning-wash:#f0b42926;
-    --critical:    #f2555a;
-    --critical-wash:#f2555a26;
-    --muted-wash:  rgba(139,137,156,0.14);
-
     --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 20px 44px -20px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.02);
     --shadow-glow: 0 1px 2px rgba(0,0,0,0.4), 0 20px 44px -20px rgba(0,0,0,0.65), 0 0 32px -8px var(--accent-wash);
   }
@@ -173,17 +81,9 @@
     height: 100vh;
     overflow-y: auto;
   }
-  .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; }
-  .sidebar-brand .mark {
-    width: 32px; height: 32px; flex: none;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 14px; color: #fff;
-    box-shadow: 0 6px 16px -6px var(--accent-wash);
-  }
-  .sidebar-brand .name { font-weight: 650; font-size: 13.5px; line-height: 1.3; letter-spacing: -0.01em; }
-  .sidebar-brand .sub { font-size: 10.5px; color: var(--ink-muted); }
+  .sidebar-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 8px 20px; }
+  .sidebar-brand img { width: 100%; max-width: 176px; height: auto; display: block; }
+  .sidebar-brand .sub { font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; color: var(--ink-muted); }
   .sidebar-section-label {
     font-size: 10px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase;
     color: var(--ink-muted); padding: 16px 10px 6px;
@@ -222,7 +122,9 @@
       padding: 12px 14px;
       border-right: none; border-bottom: 1px solid var(--border);
     }
-    .sidebar-brand { padding: 0 14px 0 0; }
+    .sidebar-brand { padding: 0 14px 0 0; flex-direction: row; align-items: center; }
+    .sidebar-brand img { max-width: 110px; }
+    .sidebar-brand .sub { display: none; }
     .sidebar-section-label { display: none; }
     .navitem { width: auto; white-space: nowrap; }
     .app { padding: 20px 16px 60px; }
@@ -555,11 +457,8 @@
 <div class="shell">
 <nav class="sidebar">
   <div class="sidebar-brand">
-    <div class="mark">PF</div>
-    <div>
-      <div class="name">Procon Fleet</div>
-      <div class="sub">Electrical &amp; Steel</div>
-    </div>
+    <img src="__LOGO_DATA_URI__" alt="Procon Group" />
+    <div class="sub">Fleet Dashboard</div>
   </div>
 
   <div class="sidebar-section-label">Fuel &amp; Expense</div>

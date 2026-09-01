@@ -16,6 +16,7 @@
     "sync:daily": "node dist/scripts/syncDaily.js",
     "sync:monthly": "node dist/scripts/syncMonthly.js",
     "dashboard:generate": "node dist/scripts/generateDashboard.js",
+    "dashboard:build": "node dashboard/build.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
