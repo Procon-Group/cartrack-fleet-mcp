@@ -1061,6 +1061,12 @@
   var MONTHS = RAW.months;
   var ML = RAW.monthlyLitres, MC = RAW.monthlyCost, MO = RAW.monthlyOther;
   var FUEL = RAW.fuel, EXPENSES = RAW.expenses;
+  if (MONTHS.length){
+    document.getElementById('data-asof').textContent = 'Data current to ' + monthLabel(MONTHS[MONTHS.length-1]);
+    document.getElementById('section-subtitle').textContent = 'Live view of the fuel-card statements and expense log — '
+      + ORDER.length + ' tracked vehicles across Electrical and Steel divisions, '
+      + monthLabel(MONTHS[0]) + ' through ' + monthLabel(MONTHS[MONTHS.length-1]) + '.';
+  }
 
   var COLORS = { Electrical: 'var(--slot-1)', Steel: 'var(--slot-2)', Unassigned: 'var(--slot-3)' };
   var COLOR_HEX_LIGHT = { Electrical: '#2a78d6', Steel: '#eb6834', Unassigned: '#1baf7a' };

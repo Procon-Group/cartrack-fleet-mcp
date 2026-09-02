@@ -17,6 +17,7 @@
     "sync:monthly": "node dist/scripts/syncMonthly.js",
     "dashboard:generate": "node dist/scripts/generateDashboard.js",
     "dashboard:build": "node dashboard/build.mjs",
+    "fleetdata:extract": "python3 dashboard/extract-workbook.py",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

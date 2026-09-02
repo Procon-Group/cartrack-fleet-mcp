@@ -300,6 +300,31 @@ If `GOOGLE_EXPORT_FOLDER_ID` is set, `syncMonthly.ts` exports the whole live She
 and uploads it to that Drive folder as `Procon Fleet — Live Dashboard - YYYY-MM.xlsx` — the
 literal Excel snapshot you asked for, alongside the Sheet itself. Leave it unset to skip.
 
+### Refreshing the dashboard's own fleet-card data (separate from the above)
+
+The above is the Google *Sheet's* Monthly Reconciliation tab. The **dashboard artifact** gets
+its fleet-card side (fuel litres/Rand, tyres/service expenses, the Fleet Register) from
+`dashboard/existing-fleet-data.json` — a static extraction baked into every published dashboard
+build, not queried live. It only updates when someone re-runs the extraction against a newer
+copy of the master workbook (after that month's statement has been merged in via the
+`fleet-cost-workbook` skill's normal process — this step is downstream of that, not a
+replacement for it):
+
+```bash
+python3 dashboard/extract-workbook.py "<path to the updated .xlsx>" dashboard/existing-fleet-data.json
+npm run dashboard:generate && npm run dashboard:build
+```
+
+Then publish `dashboard/preview.html` over the live artifact as usual. `extract-workbook.py`
+reads the workbook's Fuel Log, Vehicle Expenses and Fleet Register tabs directly with
+`openpyxl` (`data_only=True` — never writes to the workbook) and derives everything else
+(monthly per-vehicle totals, all-time totals, `km` from each vehicle's own odometer-reading
+spread, `costPerKm`) the same way the original hand-built JSON did — verified once by diffing
+its output against the previous `existing-fleet-data.json` before trusting it. This matters
+because Cost/KM, Fuel Efficiency and Cost to Company's target month is *whichever month has
+real fuel cost in this file* — until this file is refreshed, those tabs keep reconciling
+against a stale month even while the Routines pull fresh Cartrack data every day.
+
 ## 6. Things to double-check with real data
 
 - **`max_speed` units** — the `/trips` schema example suggests meters/second, while the
