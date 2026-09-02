@@ -476,10 +476,35 @@
   .vr-empty { padding: 40px 20px; text-align: center; color: var(--ink-muted); font-size: 13.5px; }
 
   @media print {
+    /*
+      The screen theme is dark-on-dark (light text, dark card backgrounds) via the --ink/--surface
+      tokens below. Printers and PDF drivers very often don't paint background colors by default —
+      when that happens, every card's dark background vanishes but the light text does not turn
+      dark on its own, so the printout is blank/unreadable. Re-pointing the same tokens to a light
+      palette here (every component already reads colors through var(--token), never a literal)
+      fixes both cases at once: with backgrounds on, cards print light-on-white; with backgrounds
+      off, the text itself is dark and stays legible against bare paper.
+    */
+    :root {
+      --page: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #f2f2f2;
+      --ink: #111114;
+      --ink-2: #45454c;
+      --ink-muted: #6c6d74;
+      --grid: #dddddd;
+      --baseline: #cccccc;
+      --border: #cccccc;
+      --border-strong: #999999;
+      --shadow: none;
+      --shadow-glow: none;
+    }
+    body { background: #ffffff !important; }
     body * { visibility: hidden; }
     #vr-report, #vr-report * { visibility: visible; }
     #vr-report { position: absolute; top: 0; left: 0; width: 100%; }
     .sidebar, .topbar, #vr-filters, footer.foot { display: none !important; }
+    #vr-report .card, #vr-report .kpi { box-shadow: none !important; border: 1px solid #ccc !important; }
   }
 </style>
 
