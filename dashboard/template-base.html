@@ -1099,7 +1099,8 @@
       <span class="filter-label" style="margin-left:6px;">Months</span>
       <div class="chipset" id="vr-month-chips" style="flex-wrap:wrap;"></div>
       <div class="spacer"></div>
-      <button class="btn-accent" id="vr-print-btn" type="button">Print report</button>
+      <span id="vr-print-status" style="font-size:12px; color:var(--ink-muted); align-self:center; margin-right:2px;"></span>
+      <button class="btn-accent" id="vr-print-btn" type="button">Download printable report</button>
     </div>
     <div id="vr-report"></div>
   </div>
@@ -2983,7 +2984,77 @@
 
     vSel.addEventListener('change', renderVehicleReport);
     var printBtn = document.getElementById('vr-print-btn');
-    if (printBtn) printBtn.addEventListener('click', function(){ window.print(); });
+    if (printBtn) printBtn.addEventListener('click', vrHandlePrintClick);
+  }
+
+  function vrBuildPrintableHtml(){
+    var reportHtml = document.getElementById('vr-report').innerHTML;
+    var vSel = document.getElementById('vr-vehicle-select');
+    var reg = vSel ? vSel.value : '';
+    var title = 'Vehicle Report' + (reg ? ' - ' + reg : '');
+    var css = ''
+      + 'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#ffffff;color:#111114;margin:0;padding:24px;}'
+      + '.card{background:#ffffff;border:1px solid #ccc;border-radius:12px;padding:18px 20px 20px;margin-bottom:14px;}'
+      + '.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;}'
+      + '.kpi{background:#ffffff;border:1px solid #ccc;border-radius:12px;padding:14px 16px;}'
+      + '.kpi-label{font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:#6c6d74;margin-bottom:4px;}'
+      + '.kpi-value{font-size:22px;font-weight:650;}'
+      + '.card-title{font-size:14px;font-weight:650;margin-bottom:2px;}'
+      + '.card-note{font-size:11.5px;color:#6c6d74;margin-bottom:10px;}'
+      + '.card-head{margin-bottom:10px;}'
+      + '.vr-head h2{font-size:19px;font-weight:700;margin:0 0 4px;}'
+      + '.vr-meta{font-size:12.5px;color:#45454c;}'
+      + '.vr-meta span+span::before{content:"\\00b7";margin:0 7px;color:#6c6d74;}'
+      + 'h3{font-size:15px;font-weight:650;margin:22px 0 10px;}'
+      + 'table{border-collapse:collapse;width:100%;}'
+      + 'thead th{text-align:left;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;color:#45454c;border-bottom:1px solid #999;padding:6px 8px;}'
+      + 'td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12.5px;}'
+      + '.num{text-align:right;}'
+      + '.plate{font-family:ui-monospace,Consolas,monospace;font-weight:600;}'
+      + '.drawer-inner{display:flex;gap:28px;flex-wrap:wrap;}'
+      + '.drawer-chart{flex:1;min-width:220px;}'
+      + '.drawer-chart-title{font-size:11px;color:#6c6d74;margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}'
+      + '.drawer-stats{display:grid;grid-template-columns:repeat(2,auto);gap:6px 22px;font-size:12.5px;}'
+      + '.drawer-stats div b{display:block;font-size:15px;font-weight:650;margin-top:1px;}'
+      + '.drawer-stats div span{color:#6c6d74;font-size:11px;text-transform:uppercase;letter-spacing:.03em;}'
+      + '.note-box{background:#f5f5f5;border:1px solid #ccc;border-radius:9px;padding:11px 13px;font-size:12.5px;color:#45454c;}'
+      + '.table-scroll{overflow-x:auto;}'
+      + '@media print { body{padding:0;} }';
+    return '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)+'</title><style>'+css+'</style></head><body>'+reportHtml+'</body></html>';
+  }
+
+  function vrHandlePrintClick(){
+    var status = document.getElementById('vr-print-status');
+    var vSel = document.getElementById('vr-vehicle-select');
+    var reg = vSel ? vSel.value : '';
+    var filename = 'Vehicle-Report-' + (reg || 'report') + '.html';
+
+    function fallbackPrint(msg){
+      status.textContent = msg || '';
+      window.print();
+    }
+
+    if (!window.claude || typeof window.claude.use !== 'function'){
+      // No artifact runtime here (e.g. this local preview) — window.print() works normally outside the sandbox.
+      fallbackPrint();
+      return;
+    }
+    status.textContent = 'Preparing…';
+    claude.use('downloads').then(function(downloads){
+      if (!downloads){
+        fallbackPrint('Download unavailable here — trying in-page print instead.');
+        return;
+      }
+      var html = vrBuildPrintableHtml();
+      status.textContent = 'Saving…';
+      downloads.save({ filename: filename, data: html }).then(function(){
+        status.textContent = 'Saved — open the file and print from your browser (Ctrl/Cmd+P).';
+      }).catch(function(err){
+        var code = err && err.code;
+        if (code === 'declined'){ status.textContent = ''; return; }
+        status.textContent = 'Save failed: ' + (err && err.message ? err.message : 'unknown error');
+      });
+    }).catch(function(){ fallbackPrint(); });
   }
 
   function vrMonthSectionHtml(reg, month){
