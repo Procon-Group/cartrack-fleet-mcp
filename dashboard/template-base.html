@@ -527,6 +527,10 @@
     Speeding
     <span class="gap-badge" id="nav-speeding-badge" style="display:none;"></span>
   </button>
+  <button class="tab navitem" data-tab="driverscores">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M5 4h14v6a7 7 0 0 1-14 0V4z"/><path d="M5 6H3a2 2 0 0 0 2 4M19 6h2a2 2 0 0 1-2 4"/></svg>
+    Driver Scores
+  </button>
 
   <div class="sidebar-section-label">Analytics</div>
   <button class="tab navitem" data-tab="fuelefficiency">
@@ -1008,13 +1012,32 @@
     </div>
   </div>
 
+  <!-- DRIVER SCORES -->
+  <div class="view" data-view="driverscores">
+    <div class="note-box" style="margin-bottom:14px;">
+      <b>Not Cartrack's official score.</b> Cartrack's Fleet API has no driver-scoring or ranking endpoint at all (confirmed against the live API spec — only <code>/drivers</code>, <code>/delivery/drivers</code>, and a beta <code>/coaching/events</code> with no score/rank fields), so the "Driver Scores" view in Fleetweb's own portal isn't reachable here. This is Procon's own estimate instead: each driver's harsh-driving rate, speeding rate and idle share, last 30 days, ranked against this fleet's own drivers — 100 is best-in-fleet, 0 is worst-in-fleet, not an absolute benchmark. Drivers with fewer than 3 trips in the window aren't scored.
+    </div>
+    <div class="kpi-row" id="ds-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Driver scores</div>
+          <div class="card-note">Ranked best to worst, last 30 days</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="ds-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
   <!-- VEHICLE REPORT -->
   <div class="view" data-view="vehiclereport">
-    <div class="filters" id="vr-filters">
+    <div class="filters" id="vr-filters" style="flex-wrap:wrap;">
       <span class="filter-label">Vehicle</span>
       <select class="control" id="vr-vehicle-select"></select>
-      <span class="filter-label" style="margin-left:6px;">Month</span>
-      <select class="control" id="vr-month-select"></select>
+      <span class="filter-label" style="margin-left:6px;">Months</span>
+      <div class="chipset" id="vr-month-chips" style="flex-wrap:wrap;"></div>
       <div class="spacer"></div>
       <button class="btn-accent" id="vr-print-btn" type="button">Print report</button>
     </div>
@@ -1847,6 +1870,7 @@
   var VM = CARTRACK.vehicleMonthly || { cartrackMonths: [], byReg: {} };
   var FE = CARTRACK.fuelEfficiency || { rows: [] };
   var GEO = CARTRACK.geofence || { configured: false, byZone: [], byVehicle: [] };
+  var DS = CARTRACK.driverScores || { windowDays: 30, rows: [] };
   var RAW2 = JSON.parse(document.getElementById('fleet-data').textContent);
   var FLEET = RAW2.vehicles || {};
   var ORDER2 = RAW2.order || [];
@@ -2718,6 +2742,48 @@
     }).join('') : '<tr><td colspan="4" style="text-align:center; color:var(--ink-muted); padding:24px;">No speeding events in the last 30 days</td></tr>';
   }
 
+  /* ---------------- Driver Scores (Procon's own estimate) ---------------- */
+  function dsBandPill(band){
+    var cls = band === 'Great' ? 'pill-good' : band === 'Average' ? 'pill-warning' : 'pill-critical';
+    return '<span class="pill '+cls+'">'+esc(band)+'</span>';
+  }
+
+  function renderDriverScoresKpis(){
+    var rows = DS.rows || [];
+    var poor = rows.filter(function(r){ return r.band === 'Poor'; }).length;
+    var avg = rows.filter(function(r){ return r.band === 'Average'; }).length;
+    var great = rows.filter(function(r){ return r.band === 'Great'; }).length;
+    var cards = [
+      { label: 'Drivers scored', value: n0(rows.length) },
+      { label: 'Great', value: n0(great) },
+      { label: 'Average', value: n0(avg) },
+      { label: 'Poor', value: n0(poor), critical: poor > 0 },
+    ];
+    document.getElementById('ds-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
+    }).join('');
+  }
+
+  function renderDriverScoresTable(){
+    var table = document.getElementById('ds-table');
+    var head = ['Rank','Driver','Score','Band','Harsh /100km','Speeding /100km','Idle %','Distance','Trips'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var rows = DS.rows || [];
+    table.querySelector('tbody').innerHTML = rows.length ? rows.map(function(r){
+      return '<tr>'
+        + '<td class="num tnum">'+n0(r.fleetRank)+'</td>'
+        + '<td>'+esc(r.driver)+'</td>'
+        + '<td class="num tnum" style="font-weight:650;">'+n0(r.score)+'</td>'
+        + '<td>'+dsBandPill(r.band)+'</td>'
+        + '<td class="num tnum">'+n1(r.harshPer100km)+'</td>'
+        + '<td class="num tnum">'+n1(r.speedingPer100km)+'</td>'
+        + '<td class="num tnum">'+n1(r.idlePct)+'%</td>'
+        + '<td class="num tnum">'+n1(r.distanceKm)+' km</td>'
+        + '<td class="num tnum">'+n0(r.tripCount)+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="9" style="text-align:center; color:var(--ink-muted); padding:24px;">No drivers with enough trips in the last 30 days to score</td></tr>';
+  }
+
   /* ---------------- Vehicle monthly report ---------------- */
   function vrMonthLabel(mk){
     if (!mk) return '';
@@ -2736,35 +2802,45 @@
       + '</div></div>';
   }
 
+  var vrState = { selectedMonths: [] };
+
   function populateVehicleReportSelectors(){
     var vSel = document.getElementById('vr-vehicle-select');
-    var mSel = document.getElementById('vr-month-select');
+    var chipBox = document.getElementById('vr-month-chips');
     var regs = vrVehicleList();
     vSel.innerHTML = regs.map(function(reg){
       var v = FLEET[reg] || {};
       return '<option value="'+esc(reg)+'">'+esc(reg)+' — '+esc(v.vehicle||v.driver||'')+'</option>';
     }).join('');
-    mSel.innerHTML = MONTHS2.map(function(mk){
-      return '<option value="'+esc(mk)+'">'+esc(vrMonthLabel(mk))+'</option>';
-    }).join('');
-    var defaultMonth = MONTHS2[MONTHS2.length-2] || MONTHS2[MONTHS2.length-1];
-    if (defaultMonth) mSel.value = defaultMonth;
     if (regs.length) vSel.value = regs[0];
+
+    var defaultMonth = MONTHS2[MONTHS2.length-2] || MONTHS2[MONTHS2.length-1];
+    vrState.selectedMonths = defaultMonth ? [defaultMonth] : [];
+
+    chipBox.innerHTML = MONTHS2.map(function(mk){
+      return '<button type="button" class="chip" data-month="'+esc(mk)+'" data-active="'+(vrState.selectedMonths.indexOf(mk)!==-1)+'">'+esc(vrMonthLabel(mk))+'</button>';
+    }).join('');
+    Array.prototype.forEach.call(chipBox.querySelectorAll('.chip'), function(chip){
+      chip.addEventListener('click', function(){
+        var mk = chip.getAttribute('data-month');
+        var idx = vrState.selectedMonths.indexOf(mk);
+        if (idx !== -1){
+          if (vrState.selectedMonths.length === 1) return; // keep at least one month selected
+          vrState.selectedMonths.splice(idx, 1);
+        } else {
+          vrState.selectedMonths.push(mk);
+        }
+        chip.setAttribute('data-active', String(vrState.selectedMonths.indexOf(mk)!==-1));
+        renderVehicleReport();
+      });
+    });
+
     vSel.addEventListener('change', renderVehicleReport);
-    mSel.addEventListener('change', renderVehicleReport);
     var printBtn = document.getElementById('vr-print-btn');
     if (printBtn) printBtn.addEventListener('click', function(){ window.print(); });
   }
 
-  function renderVehicleReport(){
-    var box = document.getElementById('vr-report');
-    var vSel = document.getElementById('vr-vehicle-select');
-    var mSel = document.getElementById('vr-month-select');
-    var reg = vSel && vSel.value;
-    var month = mSel && mSel.value;
-    if (!reg || !month){ box.innerHTML = '<div class="vr-empty">No vehicle data available.</div>'; return; }
-
-    var meta = FLEET[reg] || {};
+  function vrMonthSectionHtml(reg, month){
     var txns = FUEL2.filter(function(f){ return f.r === reg && f.m === month; });
     var litres = txns.reduce(function(s,t){ return s+(t.l||0); }, 0);
     var fuelRand = txns.reduce(function(s,t){ return s+(t.c||0); }, 0);
@@ -2811,14 +2887,9 @@
       '<div class="note-box" style="margin-top:14px;">Cartrack driving-behaviour data is only available for the most recent 3 months ('
       + VM.cartrackMonths.map(vrMonthLabel).join(', ') + '). Fuel-card figures above cover every month on record.</div>';
 
-    box.innerHTML =
-        '<div class="card">'
-          + '<div class="vr-head"><div>'
-            + '<h2>'+esc(reg)+' — '+esc(meta.vehicle||'')+'</h2>'
-            + '<div class="vr-meta"><span>'+esc(meta.division||'Unassigned')+'</span><span>'+esc(meta.driver||'No driver on record')+'</span><span>'+esc(vrMonthLabel(month))+'</span></div>'
-          + '</div></div>'
-        + '</div>'
-      + '<div class="kpi-row" style="margin-top:14px;">' + kpis.map(function(c){
+    return '<div class="vr-month-section" style="margin-top:22px;">'
+      + '<h3 style="font-size:15px; font-weight:650; margin:0 0 10px;">'+esc(vrMonthLabel(month))+'</h3>'
+      + '<div class="kpi-row">' + kpis.map(function(c){
           return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value">'+esc(c.value)+'</div></div>';
         }).join('') + '</div>'
       + (cStats ? (
@@ -2832,7 +2903,28 @@
         + '<div class="card-head"><div><div class="card-title">Fuel-card transactions</div><div class="card-note">'+esc(vrMonthLabel(month))+'</div></div></div>'
         + '<div class="table-scroll"><table><thead><tr><th>Date</th><th class="num">Litres</th><th class="num">Cost</th><th class="num">Price/L</th><th class="num">Odometer</th><th>Driver</th></tr></thead><tbody>'
         + fuelRowsHtml + '</tbody></table></div>'
-      + '</div>';
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderVehicleReport(){
+    var box = document.getElementById('vr-report');
+    var vSel = document.getElementById('vr-vehicle-select');
+    var reg = vSel && vSel.value;
+    var months = vrState.selectedMonths.slice().sort();
+    if (!reg || !months.length){ box.innerHTML = '<div class="vr-empty">No vehicle data available.</div>'; return; }
+
+    var meta = FLEET[reg] || {};
+    var monthLabelSummary = months.map(vrMonthLabel).join(', ');
+
+    box.innerHTML =
+        '<div class="card">'
+          + '<div class="vr-head"><div>'
+            + '<h2>'+esc(reg)+' — '+esc(meta.vehicle||'')+'</h2>'
+            + '<div class="vr-meta"><span>'+esc(meta.division||'Unassigned')+'</span><span>'+esc(meta.driver||'No driver on record')+'</span><span>'+esc(monthLabelSummary)+'</span></div>'
+          + '</div></div>'
+        + '</div>'
+      + months.map(function(month){ return vrMonthSectionHtml(reg, month); }).join('');
   }
 
   populateVehicleReportSelectors();
@@ -2848,6 +2940,7 @@
     cartrackoverview: { eyebrow: 'Cartrack Telemetry', title: 'Cartrack Overview', subtitle: 'Fleet-wide driving behaviour, idle time and daily activity — last 30 days.', filters: false },
     costperkm: { eyebrow: 'Cartrack Telemetry', title: 'Cost per Kilometre', subtitle: 'Fleet-card spend measured against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     speeding: { eyebrow: 'Cartrack Telemetry', title: 'Speeding Report', subtitle: 'Road-limit and fleet-threshold speeding events by vehicle and driver — last 30 days.', filters: false },
+    driverscores: { eyebrow: 'Cartrack Telemetry', title: 'Driver Scores', subtitle: 'Procon’s own estimated score — Cartrack’s Fleet API has no scoring endpoint to pull the real one from.', filters: false },
     vehiclereport: { eyebrow: 'Reports', title: 'Vehicle Monthly Report', subtitle: 'Fuel spend and Cartrack driving behaviour for one vehicle, one month, in a single printable view.', filters: false },
     fuelefficiency: { eyebrow: 'Analytics', title: 'Fuel Efficiency', subtitle: 'Litres per 100km, fuel-card litres against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     flagged: { eyebrow: 'Analytics', title: 'Flagged Vehicles', subtitle: 'Every vehicle currently over its fuel threshold, speeding, or driving harshly, in one exception list.', filters: false },
@@ -2882,6 +2975,8 @@
     renderSpeedingBarChart();
     renderSpeedingVehicleTable();
     renderSpeedingDriverTable();
+    renderDriverScoresKpis();
+    renderDriverScoresTable();
     renderFuelEfficiencyKpis();
     renderFuelEfficiencyTable();
     renderFlaggedVehicles();

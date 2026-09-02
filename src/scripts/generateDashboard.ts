@@ -187,6 +187,7 @@ async function main() {
   const dailyActivity = new Map<string, Set<string>>(); // reg -> set of "YYYY-MM-DD" with a trip
   const speedingByVehicle = new Map<string, { roadEvents: number; roadSec: number; thresholdEvents: number; thresholdSec: number; maxSpeed: number; tripsOverLimit: number }>();
   const speedingByDriver = new Map<string, { roadEvents: number; thresholdEvents: number; tripsOverLimit: number }>();
+  const driverActivity = new Map<string, { idleSec: number; drivingSec: number; distanceM: number; tripCount: number }>();
 
   for (const t of allTrips) {
     const driver = [t.driver_name, t.driver_surname].filter(Boolean).join(" ");
@@ -231,6 +232,13 @@ async function main() {
       sd.thresholdEvents += thresholdEvents;
       if (roadEvents > 0 || thresholdEvents > 0) sd.tripsOverLimit += 1;
       speedingByDriver.set(driver, sd);
+
+      const da = driverActivity.get(driver) ?? { idleSec: 0, drivingSec: 0, distanceM: 0, tripCount: 0 };
+      da.idleSec += t.idle_time_seconds ?? 0;
+      da.drivingSec += (t.trip_duration_seconds ?? 0) - (t.idle_time_seconds ?? 0);
+      da.distanceM += t.trip_distance ?? 0;
+      da.tripCount += 1;
+      driverActivity.set(driver, da);
     }
   }
 
@@ -242,6 +250,63 @@ async function main() {
   const harshByVehicleList = [...harshByVehicle.entries()]
     .map(([reg, h]) => ({ reg, ...h, total: h.accel + h.braking + h.cornering }))
     .sort((a, b) => b.total - a.total);
+
+  // ---- Driver Scores (Procon's own — Cartrack's Fleet API has no scoring/ranking endpoint at all;
+  // confirmed against the live OpenAPI spec, only /drivers, /delivery/drivers and a beta /coaching/events
+  // with no score/rank fields. This is a percentile-based estimate from data already collected above:
+  // harsh events and speeding events per 100km, plus idle time as a share of total engine-on time — each
+  // ranked against this fleet's own last-30-day distribution, not an absolute scale, so it moves as the
+  // fleet's own behaviour changes even if nobody's driving got objectively worse. Deliberately NOT
+  // presented as Cartrack's real score anywhere in the UI. ----
+  function percentileScores(values: number[]): number[] {
+    const n = values.length;
+    if (n <= 1) return values.map(() => 100);
+    const order = values.map((_, i) => i).sort((a, b) => values[a] - values[b]);
+    const scores = new Array(n);
+    order.forEach((origIdx, rank) => { scores[origIdx] = Math.round((100 * (n - 1 - rank)) / (n - 1)); });
+    return scores;
+  }
+
+  const driverMetrics = [...driverActivity.entries()]
+    .map(([driver, da]) => {
+      const distanceKm = da.distanceM / 1000;
+      const h = harshByDriver.get(driver);
+      const harshTotal = h ? h.accel + h.braking + h.cornering : 0;
+      const sp = speedingByDriver.get(driver);
+      const speedingTotal = sp ? sp.roadEvents + sp.thresholdEvents : 0;
+      const totalSec = da.idleSec + da.drivingSec;
+      return {
+        driver,
+        distanceKm,
+        tripCount: da.tripCount,
+        harshPer100km: distanceKm > 0 ? harshTotal / (distanceKm / 100) : 0,
+        speedingPer100km: distanceKm > 0 ? speedingTotal / (distanceKm / 100) : 0,
+        idlePct: totalSec > 0 ? da.idleSec / totalSec : 0,
+      };
+    })
+    .filter((m) => m.tripCount >= 3); // too few trips to be a meaningful score
+
+  const harshPct = percentileScores(driverMetrics.map((m) => m.harshPer100km));
+  const speedingPct = percentileScores(driverMetrics.map((m) => m.speedingPer100km));
+  const idlePct = percentileScores(driverMetrics.map((m) => m.idlePct));
+
+  const driverScores = driverMetrics
+    .map((m, i) => {
+      const score = Math.round(0.4 * harshPct[i] + 0.4 * speedingPct[i] + 0.2 * idlePct[i]);
+      const band = score >= 75 ? "Great" : score >= 50 ? "Average" : "Poor";
+      return {
+        driver: m.driver,
+        score,
+        band,
+        harshPer100km: Number(m.harshPer100km.toFixed(1)),
+        speedingPer100km: Number(m.speedingPer100km.toFixed(1)),
+        idlePct: Number((m.idlePct * 100).toFixed(1)),
+        distanceKm: Number(m.distanceKm.toFixed(1)),
+        tripCount: m.tripCount,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .map((d, i) => ({ ...d, fleetRank: i + 1 }));
 
   // ---- Geofence dwell time ----
   // Cartrack's account has no geofences configured yet (confirmed live), so start_geofence_name/
@@ -514,6 +579,10 @@ async function main() {
       windowDays: OVERVIEW_WINDOW_DAYS,
       byZone: geofenceByZone,
       byVehicle: geofenceByVehicle,
+    },
+    driverScores: {
+      windowDays: OVERVIEW_WINDOW_DAYS,
+      rows: driverScores,
     },
   };
 
