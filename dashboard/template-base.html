@@ -543,6 +543,11 @@
     Flagged Vehicles
     <span class="gap-badge" id="nav-flagged-badge" style="display:none;"></span>
   </button>
+  <button class="tab navitem" data-tab="dupfills">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/></svg>
+    Duplicate Fills
+    <span class="gap-badge" id="nav-dupfills-badge" style="display:none;"></span>
+  </button>
   <button class="tab navitem" data-tab="geotag">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.3-7-11.5A7 7 0 0 1 19 9.5C19 14.7 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.4"/></svg>
     Geotag
@@ -880,6 +885,36 @@
     </div>
     <div class="note-box" style="margin-top:12px;">
       <b>How flags are set:</b> <i>Fuel</i> — this month's fuel-card litres exceed the vehicle's monthly limit. <i>Speeding</i> — at least one road-limit or fleet-threshold speeding event, last 30 days. <i>Harsh driving</i> — at least one harsh braking, cornering or acceleration event, last 30 days. Sorted by total flags, most first.
+    </div>
+  </div>
+
+  <!-- DUPLICATE FILLS -->
+  <div class="view" data-view="dupfills">
+    <div class="note-box" style="margin-bottom:14px;">
+      <b>Not proof of anything on its own.</b> A second fill-up on the same card, same day, can be a genuine second trip, a re-swipe after a declined card, or a slip that got captured twice — but it is also the pattern card misuse leaves behind, so it is worth a quick look. Pay closer attention to pairs at different stations, pairs with no litres captured (rand-only swipes), or slip numbers that do not match the vehicle's usual supplier.
+    </div>
+    <div class="kpi-row" id="df-kpi-row" style="grid-template-columns:repeat(4,1fr);"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Flagged spend by month</div>
+          <div class="card-note">Same-day duplicate fills, all vehicles</div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart-dupfills" width="100%" height="220" viewBox="0 0 700 220" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Incidents</div>
+          <div class="card-note" id="df-note"></div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="df-table"><thead><tr></tr></thead><tbody></tbody></table>
+      </div>
     </div>
   </div>
 
@@ -1882,6 +1917,7 @@
   var ORDER2 = RAW2.order || [];
   var MONTHS2 = RAW2.months || [];
   var FUEL2 = RAW2.fuel || [];
+  var DF = RAW2.duplicateFills || { monthly: [], incidents: [] };
   var svgNS = 'http://www.w3.org/2000/svg';
 
   function n0(x){ return Math.round(x||0).toLocaleString(); }
@@ -2396,6 +2432,85 @@
         + '<td>'+flagsPill+'</td>'
         + '</tr>';
     }).join('');
+  }
+
+  /* ---------------- Duplicate Fills ---------------- */
+  function dfMonthAbbrev(mk){
+    var lbl = vrMonthLabel(mk);
+    var parts = lbl.split(' ');
+    return parts[0] + "'" + parts[1].slice(2);
+  }
+
+  function renderDupFillsKpis(){
+    var incidents = DF.incidents || [];
+    var monthly = DF.monthly || [];
+    var totalSpend = incidents.reduce(function(s,i){ return s+i.totalCost; }, 0);
+    var totalTxns = incidents.reduce(function(s,i){ return s+i.fillsCount; }, 0);
+    var latestMonth = monthly.length ? monthly[monthly.length-1] : null;
+    var cards = [
+      { label: 'Incidents (all time)', value: n0(incidents.length) },
+      { label: 'Flagged transactions', value: n0(totalTxns) },
+      { label: 'Flagged spend (all time)', value: money(totalSpend,0), critical: totalSpend>0 },
+      { label: latestMonth ? vrMonthLabel(latestMonth.month) : 'This month', value: latestMonth ? n0(latestMonth.flaggedTxns)+' txns' : '—', critical: !!(latestMonth && latestMonth.flaggedTxns>0) },
+    ];
+    document.getElementById('df-kpi-row').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
+    }).join('');
+    var badge = document.getElementById('nav-dupfills-badge');
+    if (incidents.length > 0){ badge.style.display = 'inline-block'; badge.textContent = incidents.length; }
+  }
+
+  function renderDupFillsChart(){
+    var svg = document.getElementById('chart-dupfills');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var rows = DF.monthly || [];
+    if (!rows.length) return;
+    var W = 700, H = 220, padL = 10, padR = 10, padB = 26, padT = 10;
+    var chartW = W - padL - padR, chartH = H - padT - padB;
+    var maxVal = Math.max(1, Math.max.apply(null, rows.map(function(r){ return r.flaggedSpend; })));
+    var barW = chartW / rows.length;
+    rows.forEach(function(r, i){
+      var h = (r.flaggedSpend / maxVal) * chartH;
+      var x = padL + i * barW;
+      var y = padT + (chartH - h);
+      var rect = document.createElementNS(svgNS,'rect');
+      rect.setAttribute('x', x + barW*0.15); rect.setAttribute('y', y);
+      rect.setAttribute('width', Math.max(0,barW*0.7)); rect.setAttribute('height', Math.max(0,h));
+      rect.setAttribute('rx', '3');
+      rect.setAttribute('fill', 'var(--critical)'); rect.setAttribute('fill-opacity', '0.75');
+      var title = document.createElementNS(svgNS,'title');
+      title.textContent = vrMonthLabel(r.month) + ': ' + n0(r.flaggedTxns) + ' txns, ' + money(r.flaggedSpend,0);
+      rect.appendChild(title);
+      svg.appendChild(rect);
+
+      var label = document.createElementNS(svgNS,'text');
+      label.setAttribute('x', x + barW/2); label.setAttribute('y', H - 8); label.setAttribute('text-anchor','middle');
+      label.setAttribute('font-size','9'); label.setAttribute('fill','var(--ink-muted)');
+      label.textContent = dfMonthAbbrev(r.month);
+      svg.appendChild(label);
+    });
+  }
+
+  function renderDupFillsTable(){
+    var table = document.getElementById('df-table');
+    var head = ['Date','Vehicle','Division','Driver','Fills','Litres','Cost','Slip No(s)','Notes'];
+    table.querySelector('thead tr').innerHTML = head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('');
+    var rows = DF.incidents || [];
+    table.querySelector('tbody').innerHTML = rows.length ? rows.map(function(inc){
+      var flagged = (inc.totalLitres === 0) ? ' <span class="pill pill-warning" title="No litres captured on either fill">rand-only</span>' : '';
+      return '<tr>'
+        + '<td class="tnum">'+esc(inc.date)+'</td>'
+        + '<td><span class="plate">'+esc(inc.reg)+'</span> '+esc(inc.vehicle)+'</td>'
+        + '<td>'+esc(inc.division)+'</td>'
+        + '<td>'+esc(inc.driver)+'</td>'
+        + '<td class="num tnum">'+n0(inc.fillsCount)+'</td>'
+        + '<td class="num tnum">'+n1(inc.totalLitres)+' L</td>'
+        + '<td class="num tnum">'+money(inc.totalCost,2)+flagged+'</td>'
+        + '<td class="tnum">'+esc(inc.slipNos.join(' / '))+'</td>'
+        + '<td style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="'+esc(inc.notes.join(' | '))+'">'+esc(inc.notes.join(' | '))+'</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="9" style="text-align:center; color:var(--ink-muted); padding:24px;">No same-day duplicate fills found</td></tr>';
+    document.getElementById('df-note').textContent = rows.length + ' incidents, most recent first';
   }
 
   /* ---------------- Geotag ---------------- */
@@ -2950,6 +3065,7 @@
     vehiclereport: { eyebrow: 'Reports', title: 'Vehicle Monthly Report', subtitle: 'Fuel spend and Cartrack driving behaviour for one vehicle, one month, in a single printable view.', filters: false },
     fuelefficiency: { eyebrow: 'Analytics', title: 'Fuel Efficiency', subtitle: 'Litres per 100km, fuel-card litres against Cartrack-metered distance, flagged against baseline and peers.', filters: false },
     flagged: { eyebrow: 'Analytics', title: 'Flagged Vehicles', subtitle: 'Every vehicle currently over its fuel threshold, speeding, or driving harshly, in one exception list.', filters: false },
+    dupfills: { eyebrow: 'Analytics', title: 'Duplicate Fills', subtitle: 'Same card, same day, two or more fill-ups — a common signal of card misuse, a missed slip re-entry, or a genuine second trip.', filters: false },
     geotag: { eyebrow: 'Analytics', title: 'Geotag', subtitle: 'Time spent inside Cartrack geofenced areas, once job-site zones are set up in Fleetweb.', filters: false },
     costcompany: { eyebrow: 'Analytics', title: 'Cost to Company', subtitle: 'All-in cost per km — fuel, tyres/services, insurance and depreciation — by vehicle and division.', filters: false },
   };
@@ -2986,6 +3102,9 @@
     renderFuelEfficiencyKpis();
     renderFuelEfficiencyTable();
     renderFlaggedVehicles();
+    renderDupFillsKpis();
+    renderDupFillsChart();
+    renderDupFillsTable();
     renderGeotag();
     renderCostToCompany();
   }

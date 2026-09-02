@@ -48,6 +48,7 @@ def main():
             "l": ws.cell(row=r, column=4).value or 0,
             "c": ws.cell(row=r, column=5).value or 0,
             "o": ws.cell(row=r, column=6).value,
+            "fsn": ws.cell(row=r, column=7).value or "",
             "v": ws.cell(row=r, column=8).value or "",
             "dv": ws.cell(row=r, column=9).value or "Unassigned",
             "p": ws.cell(row=r, column=10).value,
@@ -132,6 +133,45 @@ def main():
         totalCost = v["allTimeFuelCost"] + v["allTimeOtherCost"]
         v["costPerKm"] = round(totalCost / km, 4) if km > 0 else 0
 
+    # ---- Derived: same-day duplicate fills (same registration, 2+ fill-ups on the same
+    # calendar date) - computed directly from the Fuel Log rows above rather than trusting the
+    # workbook's own "Duplicate Fills" tab, whose detail table is a manual snapshot that can lag
+    # behind new merges (its own live monthly-summary formulas were used only to verify this
+    # computation matches exactly, not as the source). A common signal of card misuse, a missed
+    # slip re-entry, or a genuine second trip that day - not proof of anything on its own. ----
+    fillGroups = defaultdict(list)
+    for f in fuel:
+        if f["d"]:
+            fillGroups[(f["r"], f["d"])].append(f)
+    incidents = []
+    for (reg, date), rows in fillGroups.items():
+        if len(rows) < 2:
+            continue
+        rows = sorted(rows, key=lambda x: x["d"])
+        incidents.append({
+            "date": date,
+            "month": rows[0]["m"],
+            "reg": reg,
+            "vehicle": rows[0]["v"],
+            "division": rows[0]["dv"],
+            "driver": rows[0]["dr"],
+            "fillsCount": len(rows),
+            "totalLitres": round(sum(r["l"] for r in rows), 2),
+            "totalCost": round(sum(r["c"] for r in rows), 2),
+            "slipNos": [r["fsn"] for r in rows if r["fsn"]],
+            "notes": [r["n"] for r in rows if r["n"]],
+        })
+    incidents.sort(key=lambda x: x["date"], reverse=True)
+
+    dupMonthly = defaultdict(lambda: {"flaggedTxns": 0, "flaggedSpend": 0.0})
+    for inc in incidents:
+        dupMonthly[inc["month"]]["flaggedTxns"] += inc["fillsCount"]
+        dupMonthly[inc["month"]]["flaggedSpend"] += inc["totalCost"]
+    duplicateFills = {
+        "monthly": [{"month": m, "flaggedTxns": v["flaggedTxns"], "flaggedSpend": round(v["flaggedSpend"], 2)} for m, v in sorted(dupMonthly.items())],
+        "incidents": incidents,
+    }
+
     out = {
         "vehicles": vehicles,
         "order": order,
@@ -141,6 +181,7 @@ def main():
         "monthlyOther": monthlyOther,
         "expenses": expenses,
         "fuel": fuel,
+        "duplicateFills": duplicateFills,
         "expenseTypeTotals": dict(expenseTypeTotals),
     }
 
@@ -151,6 +192,7 @@ def main():
     print(f"Months: {months[0]} .. {months[-1]} ({len(months)} months)")
     print(f"Fuel transactions: {len(fuel)}")
     print(f"Expenses: {len(expenses)}")
+    print(f"Same-day duplicate-fill incidents: {len(incidents)} ({sum(i['fillsCount'] for i in incidents)} transactions, N${sum(i['totalCost'] for i in incidents):,.2f})")
     print(f"Total fuel cost: N${sum(f['c'] for f in fuel):,.2f}")
     print(f"Total fuel litres: {sum(f['l'] for f in fuel):,.1f} L")
     print(f"Total other expenses: N${sum(e['cost'] for e in expenses):,.2f}")
