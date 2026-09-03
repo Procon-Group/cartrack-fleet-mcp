@@ -1954,9 +1954,22 @@
 
   function themeColor(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
+  function parseCartrackTs(ts){
+    // Cartrack timestamps come back as "YYYY-MM-DD HH:MM:SS+02" - a bare (no-colon, no-minutes)
+    // offset already attached, not offset-less as this used to assume. A naive Date.parse of
+    // that string is silently NaN (invalid), which is why Live Status showed every vehicle as
+    // "no data"/Offline regardless of how recently it actually reported in - not a Cartrack
+    // data-quality issue as previously assumed, confirmed by fetching a status and checking its
+    // event_ts was seconds old. Mirrors parseCartrackTs in generateDashboard.ts.
+    var s = ts.replace(' ', 'T');
+    if (/Z$/.test(s)) return Date.parse(s);
+    var m = s.match(/([+-]\d{2})(:?(\d{2}))?$/);
+    if (m){ if (!m[3]) s = s + ':00'; return Date.parse(s); }
+    return Date.parse(s + 'Z');
+  }
   function ageHours(iso){
     if (!iso) return Infinity;
-    var t = Date.parse(iso.replace(' ', 'T'));
+    var t = parseCartrackTs(iso);
     if (isNaN(t)) return Infinity;
     return (Date.now() - t) / 3600000;
   }

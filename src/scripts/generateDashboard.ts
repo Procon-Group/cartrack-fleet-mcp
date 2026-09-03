@@ -88,6 +88,25 @@ function toCartrackTs(d: Date): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
+// Cartrack's response timestamps ("start_timestamp"/"end_timestamp") come back as
+// "YYYY-MM-DD HH:MM:SS+02" — space-separated, WITH a bare (no-colon, no-minutes) numeric
+// offset already attached. Naively appending "Z" (as if the string were offset-less) produces
+// "...+02Z", which every JS engine parses as Invalid Date — silently turning every date-math
+// call site that did this into a no-op (NaN comparisons are always false). Confirmed live
+// 2026-09-03 while investigating why newly-live geofence data produced zero dwell-time matches
+// despite the geofence names themselves being present and correct. Handles the offset-less case
+// too (falls back to treating it as UTC), in case that ever shows up from a different endpoint.
+function parseCartrackTs(ts: string): Date {
+  let s = ts.replace(" ", "T");
+  if (/Z$/.test(s)) return new Date(s);
+  const m = s.match(/([+-]\d{2})(:?(\d{2}))?$/);
+  if (m) {
+    if (!m[3]) s = s + ":00";
+    return new Date(s);
+  }
+  return new Date(s + "Z");
+}
+
 function monthWindow(label: string): { start: string; end: string } {
   const [y, m] = label.split("-").map(Number);
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -137,7 +156,7 @@ async function main() {
   const liveStatus = vehicles.map((v) => {
     const s = statusByReg.get(v.registration);
     const fuelPct = (s?.fuel as any)?.precentage_left ?? (s?.fuel as any)?.percentage_left ?? null;
-    const hasRecentTrip = allTrips.some((t) => t.registration === v.registration && new Date(t.start_timestamp.replace(" ", "T") + "Z").getTime() > now.getTime() - 24 * 60 * 60 * 1000);
+    const hasRecentTrip = allTrips.some((t) => t.registration === v.registration && parseCartrackTs(t.start_timestamp).getTime() > now.getTime() - 24 * 60 * 60 * 1000);
     return {
       reg: v.registration,
       manufacturer: v.manufacturer ?? "",
@@ -331,8 +350,8 @@ async function main() {
       const endGeo = sorted[i].end_geofence_name;
       const startGeo = sorted[i + 1].start_geofence_name;
       if (!endGeo || !startGeo || endGeo !== startGeo) continue;
-      const arrivedMs = new Date(sorted[i].end_timestamp.replace(" ", "T") + "Z").getTime();
-      const departedMs = new Date(sorted[i + 1].start_timestamp.replace(" ", "T") + "Z").getTime();
+      const arrivedMs = parseCartrackTs(sorted[i].end_timestamp).getTime();
+      const departedMs = parseCartrackTs(sorted[i + 1].start_timestamp).getTime();
       const minutes = (departedMs - arrivedMs) / 60000;
       if (!(minutes > 0)) continue;
 
