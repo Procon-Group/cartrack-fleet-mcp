@@ -340,6 +340,7 @@ async function main() {
   }
   const geofenceZoneStats = new Map<string, { minutes: number; visits: number; vehicles: Set<string> }>();
   const geofenceVehicleStats = new Map<string, { minutes: number; visits: number }>();
+  const geofenceVisits: { zone: string; reg: string; driver: string; arrivedAt: string; departedAt: string; minutes: number }[] = [];
   let geofenceConfigured = false;
   for (const [reg, trips] of tripsByVehicle) {
     const sorted = [...trips].sort((a, b) => (a.start_timestamp < b.start_timestamp ? -1 : 1));
@@ -365,6 +366,15 @@ async function main() {
       vs.minutes += minutes;
       vs.visits += 1;
       geofenceVehicleStats.set(reg, vs);
+
+      geofenceVisits.push({
+        zone: endGeo,
+        reg,
+        driver: [sorted[i].driver_name, sorted[i].driver_surname].filter(Boolean).join(" "),
+        arrivedAt: sorted[i].end_timestamp,
+        departedAt: sorted[i + 1].start_timestamp,
+        minutes: Number(minutes.toFixed(1)),
+      });
     }
   }
   const geofenceByZone = [...geofenceZoneStats.entries()]
@@ -373,6 +383,16 @@ async function main() {
   const geofenceByVehicle = [...geofenceVehicleStats.entries()]
     .map(([reg, s]) => ({ reg, minutes: Number(s.minutes.toFixed(1)), visits: s.visits }))
     .sort((a, b) => b.minutes - a.minutes);
+
+  // Flags: a vehicle stationary for 20+ minutes at a named zone that ISN'T Procon's own site
+  // (a long stay at your own HQ isn't noteworthy the way sitting at a supplier is). Matches by
+  // name containing "procon" or "hq" (case-insensitive) — both known home-base zones fit this;
+  // revisit if a real supplier zone ever collides with that pattern.
+  const GEOFENCE_HOME_BASE_RE = /procon|hq/i;
+  const GEOFENCE_FLAG_MINUTES = 20;
+  const geofenceSupplierFlags = geofenceVisits
+    .filter((v) => v.minutes > GEOFENCE_FLAG_MINUTES && !GEOFENCE_HOME_BASE_RE.test(v.zone))
+    .sort((a, b) => (a.arrivedAt < b.arrivedAt ? 1 : -1));
 
   const idleVsDrivingList = [...idleVsDriving.entries()]
     .map(([reg, v]) => ({ reg, idleMin: Math.round(v.idleSec / 60), drivingMin: Math.round(v.drivingSec / 60), idlePerTripMin: v.tripCount > 0 ? Math.round(v.idleSec / 60 / v.tripCount) : 0 }))
@@ -598,6 +618,8 @@ async function main() {
       windowDays: OVERVIEW_WINDOW_DAYS,
       byZone: geofenceByZone,
       byVehicle: geofenceByVehicle,
+      flagMinutes: GEOFENCE_FLAG_MINUTES,
+      supplierFlags: geofenceSupplierFlags,
     },
     driverScores: {
       windowDays: OVERVIEW_WINDOW_DAYS,
@@ -607,7 +629,7 @@ async function main() {
 
   writeFileSync(outputPath, JSON.stringify(cartrackData));
   console.log(`\nWrote ${outputPath} (${(JSON.stringify(cartrackData).length / 1024).toFixed(0)} KB)`);
-  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}, fuel-efficiency rows: ${fuelEfficiency.length}, geofence zones: ${geofenceByZone.length}`);
+  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}, fuel-efficiency rows: ${fuelEfficiency.length}, geofence zones: ${geofenceByZone.length}, supplier stops >${GEOFENCE_FLAG_MINUTES}min: ${geofenceSupplierFlags.length}`);
 }
 
 main().catch((err) => {
