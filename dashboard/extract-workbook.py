@@ -19,9 +19,12 @@ skill) if the workbook's own structure has changed since - the workbook always w
 Usage: python3 extract-workbook.py <path-to-xlsx> <output-json-path>
 """
 import sys
+import os
 import json
 import openpyxl
 from collections import defaultdict
+
+CTC_SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ctc-settings.json")
 
 def month_key(dt):
     return dt.strftime("%Y-%m") if dt else None
@@ -172,6 +175,16 @@ def main():
         "incidents": incidents,
     }
 
+    # ---- Cost-to-Company vehicle settings (insurance, purchase price, depreciation) ----
+    # Baked in from a small hand-maintained file rather than live-edited on the dashboard, since
+    # a public dashboard can't declare the db capability (see ctc-settings.json's own comment
+    # trail / chat history: Sep 2026 - db blocks "Anyone with the link" sharing outright). Update
+    # ctc-settings.json directly when a vehicle's figures change, then re-run this script.
+    ctcSettings = {}
+    if os.path.exists(CTC_SETTINGS_PATH):
+        with open(CTC_SETTINGS_PATH, "r", encoding="utf-8") as fh:
+            ctcSettings = json.load(fh)
+
     out = {
         "vehicles": vehicles,
         "order": order,
@@ -183,6 +196,7 @@ def main():
         "fuel": fuel,
         "duplicateFills": duplicateFills,
         "expenseTypeTotals": dict(expenseTypeTotals),
+        "ctcSettings": ctcSettings,
     }
 
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -196,6 +210,7 @@ def main():
     print(f"Total fuel cost: N${sum(f['c'] for f in fuel):,.2f}")
     print(f"Total fuel litres: {sum(f['l'] for f in fuel):,.1f} L")
     print(f"Total other expenses: N${sum(e['cost'] for e in expenses):,.2f}")
+    print(f"Cost-to-Company settings: {len(ctcSettings)} vehicle(s) configured (from {CTC_SETTINGS_PATH})")
     print(f"Wrote {out_path}")
 
 if __name__ == "__main__":
