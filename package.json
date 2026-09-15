@@ -9,13 +9,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
-    "dev": "tsx src/server.ts",
+    "start": "cross-env NODE_USE_ENV_PROXY=1 node dist/server.js",
+    "dev": "cross-env NODE_USE_ENV_PROXY=1 tsx src/server.ts",
     "setup:sheet": "node dist/scripts/setupDashboardSheet.js",
     "setup:tabs": "node dist/scripts/initDashboardTabs.js",
-    "sync:daily": "node dist/scripts/syncDaily.js",
-    "sync:monthly": "node dist/scripts/syncMonthly.js",
-    "dashboard:generate": "node dist/scripts/generateDashboard.js",
+    "sync:daily": "cross-env NODE_USE_ENV_PROXY=1 node dist/scripts/syncDaily.js",
+    "sync:monthly": "cross-env NODE_USE_ENV_PROXY=1 node dist/scripts/syncMonthly.js",
+    "dashboard:generate": "cross-env NODE_USE_ENV_PROXY=1 node dist/scripts/generateDashboard.js",
     "dashboard:build": "node dashboard/build.mjs",
     "fleetdata:extract": "python3 dashboard/extract-workbook.py",
     "typecheck": "tsc --noEmit"
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "cross-env": "^10.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },

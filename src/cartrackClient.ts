@@ -1,11 +1,22 @@
 import { ApiErrorBody, CartrackApiError, PaginationMeta } from "./types.js";
 
+// Cloud Routine environments (and possibly others) route outbound HTTPS through a local
+// policy-enforcing egress proxy set via HTTPS_PROXY, but Node's built-in `fetch` (undici)
+// ignores that env var by default and fails every request with a 503
+// ("upstream connect error ... connection timeout") unless NODE_USE_ENV_PROXY=1 is set at
+// process start (it's a Node-configuration env var read during Node's own init, like
+// NODE_OPTIONS — setting process.env.NODE_USE_ENV_PROXY here at module-load time is too late
+// to have any effect). The actual fix lives in package.json's scripts, which set it before
+// invoking node. Confirmed 2026-09-15: identical requests return 200 with the flag set ahead
+// of time and 503 without it, with valid credentials either way — this is not an auth/config
+// problem, and Google Sheets calls in the same run are unaffected (gaxios doesn't hit this).
+
 export interface CartrackConfig {
-  // Optional on purpose: when running as a Claude Code cloud Routine, auth is attached by
-  // Anthropic's agent proxy via an "API credential" scoped to the Cartrack host, after the
-  // request leaves the session — the raw username/password never reaches the routine's
-  // environment. Only set these for local/manual runs, where the client builds the Basic
-  // auth header itself. See "API credentials for cloud Routines" in the README.
+  // CARTRACK_USERNAME/CARTRACK_PASSWORD must always be set explicitly (as real Environment
+  // secrets, never as literal values in a prompt or file) — there is no cloud-Routine
+  // mechanism that auto-attaches Cartrack auth without them. An earlier version of this
+  // comment claimed otherwise; that claim didn't match observed behavior (both env vars are
+  // always required) and has been removed.
   username?: string;
   password?: string;
   baseUrl: string; // e.g. https://fleetapi-na.cartrack.com/rest
@@ -16,13 +27,10 @@ export function loadConfigFromEnv(): CartrackConfig {
   const password = process.env.CARTRACK_PASSWORD;
   const baseUrl = process.env.CARTRACK_BASE_URL;
   if (!baseUrl) {
-    throw new Error(
-      "Missing CARTRACK_BASE_URL (see .env.example). This is required even when auth is supplied " +
-        "via a cloud Routine's API credential, since the client still needs to know which host to call.",
-    );
+    throw new Error("Missing CARTRACK_BASE_URL (see .env.example).");
   }
-  if ((username && !password) || (!username && password)) {
-    throw new Error("Set both CARTRACK_USERNAME and CARTRACK_PASSWORD, or neither (relying on a Routine API credential instead) — not just one.");
+  if (!username || !password) {
+    throw new Error("Set both CARTRACK_USERNAME and CARTRACK_PASSWORD.");
   }
   return { username, password, baseUrl };
 }
