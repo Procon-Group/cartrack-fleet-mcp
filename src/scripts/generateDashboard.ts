@@ -340,8 +340,14 @@ async function main() {
   }
   const geofenceZoneStats = new Map<string, { minutes: number; visits: number; vehicles: Set<string> }>();
   const geofenceVehicleStats = new Map<string, { minutes: number; visits: number }>();
-  const geofenceVisits: { zone: string; reg: string; driver: string; arrivedAt: string; departedAt: string; minutes: number }[] = [];
+  const geofenceVisits: { zone: string; reg: string; driver: string; arrivedAt: string; departedAt: string; minutes: number; flagged: boolean }[] = [];
   let geofenceConfigured = false;
+  // A vehicle stationary for 20+ minutes at a named zone that ISN'T Procon's own site (a long
+  // stay at your own HQ isn't noteworthy the way sitting at a supplier is). Matches by name
+  // containing "procon" or "hq" (case-insensitive) — both known home-base zones fit this;
+  // revisit if a real supplier zone ever collides with that pattern.
+  const GEOFENCE_HOME_BASE_RE = /procon|hq/i;
+  const GEOFENCE_FLAG_MINUTES = 20;
   for (const [reg, trips] of tripsByVehicle) {
     const sorted = [...trips].sort((a, b) => (a.start_timestamp < b.start_timestamp ? -1 : 1));
     for (const t of sorted) {
@@ -374,25 +380,17 @@ async function main() {
         arrivedAt: sorted[i].end_timestamp,
         departedAt: sorted[i + 1].start_timestamp,
         minutes: Number(minutes.toFixed(1)),
+        flagged: minutes > GEOFENCE_FLAG_MINUTES && !GEOFENCE_HOME_BASE_RE.test(endGeo),
       });
     }
   }
+  geofenceVisits.sort((a, b) => (a.arrivedAt < b.arrivedAt ? 1 : -1));
   const geofenceByZone = [...geofenceZoneStats.entries()]
     .map(([zone, s]) => ({ zone, minutes: Number(s.minutes.toFixed(1)), visits: s.visits, vehicleCount: s.vehicles.size }))
     .sort((a, b) => b.minutes - a.minutes);
   const geofenceByVehicle = [...geofenceVehicleStats.entries()]
     .map(([reg, s]) => ({ reg, minutes: Number(s.minutes.toFixed(1)), visits: s.visits }))
     .sort((a, b) => b.minutes - a.minutes);
-
-  // Flags: a vehicle stationary for 20+ minutes at a named zone that ISN'T Procon's own site
-  // (a long stay at your own HQ isn't noteworthy the way sitting at a supplier is). Matches by
-  // name containing "procon" or "hq" (case-insensitive) — both known home-base zones fit this;
-  // revisit if a real supplier zone ever collides with that pattern.
-  const GEOFENCE_HOME_BASE_RE = /procon|hq/i;
-  const GEOFENCE_FLAG_MINUTES = 20;
-  const geofenceSupplierFlags = geofenceVisits
-    .filter((v) => v.minutes > GEOFENCE_FLAG_MINUTES && !GEOFENCE_HOME_BASE_RE.test(v.zone))
-    .sort((a, b) => (a.arrivedAt < b.arrivedAt ? 1 : -1));
 
   const idleVsDrivingList = [...idleVsDriving.entries()]
     .map(([reg, v]) => ({ reg, idleMin: Math.round(v.idleSec / 60), drivingMin: Math.round(v.drivingSec / 60), idlePerTripMin: v.tripCount > 0 ? Math.round(v.idleSec / 60 / v.tripCount) : 0 }))
@@ -619,7 +617,7 @@ async function main() {
       byZone: geofenceByZone,
       byVehicle: geofenceByVehicle,
       flagMinutes: GEOFENCE_FLAG_MINUTES,
-      supplierFlags: geofenceSupplierFlags,
+      visits: geofenceVisits,
     },
     driverScores: {
       windowDays: OVERVIEW_WINDOW_DAYS,
@@ -629,7 +627,7 @@ async function main() {
 
   writeFileSync(outputPath, JSON.stringify(cartrackData));
   console.log(`\nWrote ${outputPath} (${(JSON.stringify(cartrackData).length / 1024).toFixed(0)} KB)`);
-  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}, fuel-efficiency rows: ${fuelEfficiency.length}, geofence zones: ${geofenceByZone.length}, supplier stops >${GEOFENCE_FLAG_MINUTES}min: ${geofenceSupplierFlags.length}`);
+  console.log(`Live status: ${liveStatus.length}, trips: ${tripHistory.length}, drivers: ${topDriversByHarshEvents.length}, cost/km rows: ${costPerKm.length}, fuel-efficiency rows: ${fuelEfficiency.length}, geofence zones: ${geofenceByZone.length}, supplier stops >${GEOFENCE_FLAG_MINUTES}min: ${geofenceVisits.filter((v) => v.flagged).length}`);
 }
 
 main().catch((err) => {

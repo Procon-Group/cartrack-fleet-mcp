@@ -946,6 +946,14 @@
 
   <!-- GEOTAG -->
   <div class="view" data-view="geotag">
+    <div class="filters" id="geo-filters">
+      <span class="filter-label">Vehicle</span>
+      <select class="control" id="geo-filter-vehicle"><option value="">All vehicles</option></select>
+      <span class="filter-label" style="margin-left:6px;">Place</span>
+      <select class="control" id="geo-filter-zone"><option value="">All places</option></select>
+      <div class="spacer"></div>
+      <button class="chip" id="geo-filter-reset" type="button">Reset</button>
+    </div>
     <div id="geo-content"></div>
   </div>
 
@@ -1919,7 +1927,7 @@
   var COVERAGE = CARTRACK.coverage || {};
   var VM = CARTRACK.vehicleMonthly || { cartrackMonths: [], byReg: {} };
   var FE = CARTRACK.fuelEfficiency || { rows: [] };
-  var GEO = CARTRACK.geofence || { configured: false, byZone: [], byVehicle: [] };
+  var GEO = CARTRACK.geofence || { configured: false, byZone: [], byVehicle: [], visits: [] };
   var DS = CARTRACK.driverScores || { windowDays: 30, rows: [] };
   var RAW2 = JSON.parse(document.getElementById('fleet-data').textContent);
   var FLEET = RAW2.vehicles || {};
@@ -2543,30 +2551,75 @@
   }
   function geoDate(ts){ return ts ? ts.slice(0,10) : '—'; }
 
+  var geoState = { vehicle: '', zone: '' };
+
+  function populateGeoFilters(){
+    var vSel = document.getElementById('geo-filter-vehicle');
+    var zSel = document.getElementById('geo-filter-zone');
+    var resetBtn = document.getElementById('geo-filter-reset');
+    if (!vSel || !zSel) return;
+
+    var vehicles = GEO.byVehicle.map(function(v){ return v.reg; }).sort();
+    vSel.innerHTML = '<option value="">All vehicles</option>' + vehicles.map(function(reg){
+      return '<option value="'+esc(reg)+'">'+esc(reg)+'</option>';
+    }).join('');
+
+    var zones = GEO.byZone.map(function(z){ return z.zone; }).sort();
+    zSel.innerHTML = '<option value="">All places</option>' + zones.map(function(zone){
+      return '<option value="'+esc(zone)+'">'+esc(zone)+'</option>';
+    }).join('');
+
+    vSel.addEventListener('change', function(){ geoState.vehicle = vSel.value; renderGeotag(); });
+    zSel.addEventListener('change', function(){ geoState.zone = zSel.value; renderGeotag(); });
+    resetBtn.addEventListener('click', function(){
+      geoState.vehicle = ''; geoState.zone = '';
+      vSel.value = ''; zSel.value = '';
+      renderGeotag();
+    });
+  }
+
+  function geoSetFilter(kind, value){
+    geoState[kind] = value;
+    var sel = document.getElementById(kind === 'vehicle' ? 'geo-filter-vehicle' : 'geo-filter-zone');
+    if (sel) sel.value = value;
+    renderGeotag();
+  }
+
   function renderGeotag(){
     var box = document.getElementById('geo-content');
     if (!GEO.configured){
+      document.getElementById('geo-filters').style.display = 'none';
       box.innerHTML = '<div class="card"><div class="vr-empty" style="max-width:480px;margin:0 auto;">'
         + '<b style="color:var(--ink); display:block; margin-bottom:8px; font-size:15px;">No geofences configured yet</b>'
         + 'Cartrack has no geofenced job-site zones set up in Fleetweb for this account. Once geofences are created there, this report will automatically start showing how long each vehicle spends inside each zone — no changes needed here.'
         + '</div></div>';
       return;
     }
+    document.getElementById('geo-filters').style.display = 'flex';
     var flagMin = GEO.flagMinutes || 20;
-    var flags = GEO.supplierFlags || [];
+    var visits = GEO.visits || [];
+    var flaggedCount = visits.filter(function(v){ return v.flagged; }).length;
     var kpis = [
       { label: 'Zones with activity', value: n0(GEO.byZone.length) },
       { label: 'Vehicles with visits', value: n0(GEO.byVehicle.length) },
       { label: 'Total visits', value: n0(GEO.byZone.reduce(function(s,z){return s+z.visits;},0)) },
-      { label: 'Supplier stops >'+flagMin+'min', value: n0(flags.length), critical: flags.length>0 },
+      { label: 'Supplier stops >'+flagMin+'min', value: n0(flaggedCount), critical: flaggedCount>0 },
     ];
     var zoneRows = GEO.byZone.map(function(z){
-      return '<tr><td>'+esc(z.zone)+'</td><td class="num tnum">'+n0(z.visits)+'</td><td class="num tnum">'+n0(z.vehicleCount)+'</td><td class="num tnum">'+n0(z.minutes)+' min</td></tr>';
+      return '<tr class="rowline" data-zone="'+esc(z.zone)+'" data-active="'+(geoState.zone===z.zone)+'"><td>'+esc(z.zone)+'</td><td class="num tnum">'+n0(z.visits)+'</td><td class="num tnum">'+n0(z.vehicleCount)+'</td><td class="num tnum">'+n0(z.minutes)+' min</td></tr>';
     }).join('');
     var vehicleRows = GEO.byVehicle.map(function(v){
-      return '<tr><td><span class="plate">'+esc(v.reg)+'</span></td><td class="num tnum">'+n0(v.visits)+'</td><td class="num tnum">'+n0(v.minutes)+' min</td></tr>';
+      return '<tr class="rowline" data-reg="'+esc(v.reg)+'" data-active="'+(geoState.vehicle===v.reg)+'"><td><span class="plate">'+esc(v.reg)+'</span></td><td class="num tnum">'+n0(v.visits)+'</td><td class="num tnum">'+n0(v.minutes)+' min</td></tr>';
     }).join('');
-    var flagRows = flags.length ? flags.map(function(f){
+
+    var filtered = visits.filter(function(v){
+      return (!geoState.vehicle || v.reg === geoState.vehicle) && (!geoState.zone || v.zone === geoState.zone);
+    });
+    var noteBits = [];
+    if (geoState.vehicle) noteBits.push(esc(geoState.vehicle));
+    if (geoState.zone) noteBits.push('at ' + esc(geoState.zone));
+    var visitsNote = noteBits.length ? 'Showing ' + filtered.length + ' visit' + (filtered.length===1?'':'s') + ' — ' + noteBits.join(' ') : 'All visits, last ' + (GEO.windowDays||30) + ' days';
+    var visitRows = filtered.length ? filtered.map(function(f){
       return '<tr>'
         + '<td class="tnum">'+esc(geoDate(f.arrivedAt))+'</td>'
         + '<td>'+esc(f.zone)+'</td>'
@@ -2574,25 +2627,40 @@
         + '<td>'+esc(f.driver||'—')+'</td>'
         + '<td class="num tnum">'+esc(geoTime(f.arrivedAt))+'</td>'
         + '<td class="num tnum">'+esc(geoTime(f.departedAt))+'</td>'
-        + '<td class="num"><span class="pill pill-warning">'+n0(f.minutes)+' min</span></td>'
+        + '<td class="num"><span class="'+(f.flagged?'pill pill-warning':'tnum')+'">'+n0(f.minutes)+' min</span></td>'
         + '</tr>';
-    }).join('') : '<tr><td colspan="7" style="text-align:center; color:var(--ink-muted); padding:24px;">No supplier stops over '+flagMin+' minutes in the window</td></tr>';
+    }).join('') : '<tr><td colspan="7" style="text-align:center; color:var(--ink-muted); padding:24px;">No visits match this filter</td></tr>';
+
     box.innerHTML =
         '<div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">' + kpis.map(function(c){
           return '<div class="kpi"><div class="kpi-label">'+esc(c.label)+'</div><div class="kpi-value'+(c.critical?' critical':'')+'">'+esc(c.value)+'</div></div>';
         }).join('') + '</div>'
       + '<div class="card" style="margin-top:14px;">'
-        + '<div class="card-head"><div><div class="card-title">Supplier stops over '+flagMin+' minutes</div><div class="card-note">Excludes Procon\'s own sites — a long stay there isn\'t noteworthy the way sitting at a supplier is</div></div></div>'
-        + '<div class="table-scroll"><table><thead><tr><th>Date</th><th>Zone</th><th>Vehicle</th><th>Driver</th><th class="num">Arrived</th><th class="num">Departed</th><th class="num">Duration</th></tr></thead><tbody>'+flagRows+'</tbody></table></div>'
+        + '<div class="card-head"><div><div class="card-title">Visits</div><div class="card-note">'+visitsNote+' &middot; flagged = over '+flagMin+'min outside Procon\'s own sites</div></div></div>'
+        + '<div class="table-scroll"><table><thead><tr><th>Date</th><th>Zone</th><th>Vehicle</th><th>Driver</th><th class="num">Arrived</th><th class="num">Departed</th><th class="num">Duration</th></tr></thead><tbody>'+visitRows+'</tbody></table></div>'
       + '</div>'
       + '<div class="grid-2" style="margin-top:14px;">'
-        + '<div class="card"><div class="card-head"><div><div class="card-title">By zone</div><div class="card-note">Total time spent, last '+(GEO.windowDays||30)+' days</div></div></div>'
+        + '<div class="card"><div class="card-head"><div><div class="card-title">By zone</div><div class="card-note">Click a row to filter &middot; total time, last '+(GEO.windowDays||30)+' days</div></div></div>'
           + '<div class="table-scroll"><table><thead><tr><th>Zone</th><th class="num">Visits</th><th class="num">Vehicles</th><th class="num">Time</th></tr></thead><tbody>'+zoneRows+'</tbody></table></div></div>'
-        + '<div class="card"><div class="card-head"><div><div class="card-title">By vehicle</div><div class="card-note">Total time in any zone</div></div></div>'
+        + '<div class="card"><div class="card-head"><div><div class="card-title">By vehicle</div><div class="card-note">Click a row to filter &middot; total time in any zone</div></div></div>'
           + '<div class="table-scroll"><table><thead><tr><th>Vehicle</th><th class="num">Visits</th><th class="num">Time</th></tr></thead><tbody>'+vehicleRows+'</tbody></table></div></div>'
       + '</div>';
+
+    Array.prototype.forEach.call(box.querySelectorAll('tr[data-zone]'), function(tr){
+      tr.addEventListener('click', function(){
+        var zone = tr.getAttribute('data-zone');
+        geoSetFilter('zone', geoState.zone === zone ? '' : zone);
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('tr[data-reg]'), function(tr){
+      tr.addEventListener('click', function(){
+        var reg = tr.getAttribute('data-reg');
+        geoSetFilter('vehicle', geoState.vehicle === reg ? '' : reg);
+      });
+    });
+
     var badge = document.getElementById('nav-geotag-badge');
-    if (flags.length > 0){ badge.style.display = 'inline-block'; badge.textContent = flags.length; }
+    if (flaggedCount > 0){ badge.style.display = 'inline-block'; badge.textContent = flaggedCount; }
   }
 
   /* ---------------- Cost to Company ---------------- */
@@ -3016,6 +3084,7 @@
 
   populateVehicleReportSelectors();
   renderVehicleReport();
+  populateGeoFilters();
 
   /* ---------------- Section header + filter visibility per tab ---------------- */
   var SECTION_META = {

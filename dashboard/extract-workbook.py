@@ -103,7 +103,13 @@ def main():
         }
 
     # ---- Derived: months list (union of fuel + expense months, sorted) ----
-    months = sorted(set(f["m"] for f in fuel if f["m"]) | set(e["month"] for e in expenses if e["month"]))
+    # Starts at the first fleet-card month: the expense history reaches back further, and
+    # months before the card data would chart as zero fuel and dilute the "All time" per-month
+    # average. Earlier expenses still count in expenses[] and the all-time totals.
+    fuel_months = set(f["m"] for f in fuel if f["m"])
+    first_fuel_month = min(fuel_months) if fuel_months else None
+    months = sorted(m for m in fuel_months | set(e["month"] for e in expenses if e["month"])
+                    if first_fuel_month is None or m >= first_fuel_month)
 
     # ---- Derived: monthlyLitres / monthlyCost per vehicle per month (fuel-sourced) ----
     monthlyLitres = {reg: {m: 0 for m in months} for reg in order}
